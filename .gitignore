@@ -1,0 +1,8 @@
+.qlib/**
+.venv/**
+*.pyc
+__pycache__/
+mlruns/**
+mnt/**
+.github/**
+**.csv

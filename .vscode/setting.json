@@ -1,0 +1,21 @@
+{
+    "defaultTerminal": {
+        "linux": "zsh",
+        "windows": "wsl.exe"
+    },
+    "terminal.integrated.defaultProfile.linux": "zsh",
+    "terminal.integrated.defaultProfile.windows": "wsl.exe",
+    "terminal.integrated.profiles.windows": {
+        "wsl.exe": {
+            "path": "wsl.exe",
+            "args": []
+        }
+    },
+    "terminal.integrated.profiles.linux": {
+        "zsh": {
+            "path": "zsh",
+            "args": ["--login"]
+        }
+    }
+
+}
