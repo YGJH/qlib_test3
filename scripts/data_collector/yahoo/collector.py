@@ -222,7 +222,7 @@ class YahooCollectorCN(YahooCollector, ABC):
 class YahooCollectorCN1d(YahooCollectorCN):
     def download_index_data(self):
         # TODO: from MSN
-        _format = "%Y%m%d"
+        _format = "%Y-%m-%d"
         _begin = self.start_datetime.strftime(_format)
         _end = self.end_datetime.strftime(_format)
         for _index_name, _index_code in {"csi300": "000300", "csi100": "000903", "csi500": "000905"}.items():
@@ -264,36 +264,15 @@ class YahooCollectorCN1min(YahooCollectorCN):
 class YahooCollectorUS(YahooCollector, ABC):
     def get_instrument_list(self):
         logger.info("get US stock symbols......")
-        import random
-        
-        index_symbols = [
+        symbols = get_us_stock_symbols() + [
             "^GSPC",
-            "^NDX", 
+            "^NDX",
             "^DJI",
         ]
-        
-        all_symbols = get_us_stock_symbols()
-        
-        # Filter out potentially problematic symbols
-        filtered_symbols = []
-        for symbol in all_symbols:
-            # Skip symbols that are too short or too long
-            if len(symbol) < 1 or len(symbol) > 5:
-                continue
-            # Skip symbols with unusual characters
-            if not symbol.replace('-', '').replace('.', '').isalnum():
-                continue
-            # Skip symbols that are known to be problematic
-            if symbol in ['ASPSZ', 'AACQU', 'AACU']:  # Add known problematic symbols
-                continue
-            filtered_symbols.append(symbol)
-        
-        random.shuffle(filtered_symbols)
-        selected_stocks = filtered_symbols[:30]  # Select 30 random stocks
-        
-        symbols = index_symbols + selected_stocks
-        logger.info(f"Selected {len(index_symbols)} indices + {len(selected_stocks)} stocks = {len(symbols)} total symbols")
-        logger.info(f"Selected stocks: {selected_stocks}")
+        import random
+        random.shuffle(symbols)
+        symbols = symbols[:10]
+        logger.info(f"get {len(symbols)} symbols.")
         return symbols
 
     def download_index_data(self):
@@ -395,13 +374,13 @@ class YahooNormalize(BaseNormalize):
     @staticmethod
     def calc_change(df: pd.DataFrame, last_close: float) -> pd.Series:
         df = df.copy()
-        _tmp_series = df["close"].fillna(method="ffill")
+        _tmp_series = df["close"].ffill()
         _tmp_shift_series = _tmp_series.shift(1)
         if last_close is not None:
             _tmp_shift_series.iloc[0] = float(last_close)
         change_series = _tmp_series / _tmp_shift_series - 1
         return change_series
-    
+
     @staticmethod
     def normalize_yahoo(
         df: pd.DataFrame,
@@ -410,95 +389,62 @@ class YahooNormalize(BaseNormalize):
         symbol_field_name: str = "symbol",
         last_close: float = None,
     ):
-        try:
-            if df is None or df.empty:
-                return df
-            
-            # Ensure df is actually a DataFrame
-            if not isinstance(df, pd.DataFrame):
-                logger.error(f"Expected DataFrame, got {type(df)}")
-                return pd.DataFrame(columns=[date_field_name, symbol_field_name] + YahooNormalize.COLUMNS + ["change"])
-            
-            symbol = df.loc[df[symbol_field_name].first_valid_index(), symbol_field_name]
-            columns = copy.deepcopy(YahooNormalize.COLUMNS)
-            df = df.copy()
-            df.set_index(date_field_name, inplace=True)
-            df.index = pd.to_datetime(df.index)
-            df.index = df.index.tz_localize(None)
-            df = df[~df.index.duplicated(keep="first")]
-            
-            if calendar_list is not None:
-                try:
-                    # Create the date range more safely
-                    min_date = pd.Timestamp(df.index.min()).date()
-                    max_date = pd.Timestamp(df.index.max()).date() + pd.Timedelta(hours=23, minutes=59)
-                    
-                    # Filter calendar_list to only include dates within our data range
-                    filtered_calendar = [
-                        date for date in calendar_list 
-                        if min_date <= pd.Timestamp(date).date() <= max_date.date()
-                    ]
-                    
-                    if filtered_calendar:
-                        df = df.reindex(pd.DatetimeIndex(filtered_calendar))
-                    else:
-                        logger.warning(f"No valid calendar dates found for symbol {symbol}, skipping reindex")
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to reindex with calendar for symbol {symbol}: {e}, skipping reindex")
-                    
-            df.sort_index(inplace=True)
-            df.loc[(df["volume"] <= 0) | np.isnan(df["volume"]), list(set(df.columns) - {symbol_field_name})] = np.nan
+        if df.empty:
+            return df
+        symbol = df.loc[df[symbol_field_name].first_valid_index(), symbol_field_name]
+        columns = copy.deepcopy(YahooNormalize.COLUMNS)
+        df = df.copy()
+        df.set_index(date_field_name, inplace=True)
+        df.index = pd.to_datetime(df.index)
+        df.index = df.index.tz_localize(None)
+        df = df[~df.index.duplicated(keep="first")]
+        if calendar_list is not None:
+            df = df.reindex(
+                pd.DataFrame(index=calendar_list)
+                .loc[
+                    pd.Timestamp(df.index.min()).date() : pd.Timestamp(df.index.max()).date()
+                    + pd.Timedelta(hours=23, minutes=59)
+                ]
+                .index
+            )
+        df.sort_index(inplace=True)
+        df.loc[(df["volume"] <= 0) | np.isnan(df["volume"]), list(set(df.columns) - {symbol_field_name})] = np.nan
 
+        change_series = YahooNormalize.calc_change(df, last_close)
+        # NOTE: The data obtained by Yahoo finance sometimes has exceptions
+        # WARNING: If it is normal for a `symbol(exchange)` to differ by a factor of *89* to *111* for consecutive trading days,
+        # WARNING: the logic in the following line needs to be modified
+        _count = 0
+        while True:
+            # NOTE: may appear unusual for many days in a row
             change_series = YahooNormalize.calc_change(df, last_close)
-            # NOTE: The data obtained by Yahoo finance sometimes has exceptions
-            # WARNING: If it is normal for a `symbol(exchange)` to differ by a factor of *89* to *111* for consecutive trading days,
-            # WARNING: the logic in the following line needs to be modified
-            _count = 0
-            while True:
-                # NOTE: may appear unusual for many days in a row
-                change_series = YahooNormalize.calc_change(df, last_close)
-                _mask = (change_series >= 89) & (change_series <= 111)
-                if not _mask.any():
-                    break
-                _tmp_cols = ["high", "close", "low", "open", "adjclose"]
-                df.loc[_mask, _tmp_cols] = df.loc[_mask, _tmp_cols] / 100
-                _count += 1
-                if _count >= 10:
-                    _symbol = df.loc[df[symbol_field_name].first_valid_index()]["symbol"]
-                    logger.warning(
-                        f"{_symbol} `change` is abnormal for {_count} consecutive days, please check the specific data file carefully"
-                    )
+            _mask = (change_series >= 89) & (change_series <= 111)
+            if not _mask.any():
+                break
+            _tmp_cols = ["high", "close", "low", "open", "adjclose"]
+            df.loc[_mask, _tmp_cols] = df.loc[_mask, _tmp_cols] / 100
+            _count += 1
+            if _count >= 10:
+                _symbol = df.loc[df[symbol_field_name].first_valid_index()]["symbol"]
+                logger.warning(
+                    f"{_symbol} `change` is abnormal for {_count} consecutive days, please check the specific data file carefully"
+                )
 
-            df["change"] = YahooNormalize.calc_change(df, last_close)
+        df["change"] = YahooNormalize.calc_change(df, last_close)
 
-            columns += ["change"]
-            df.loc[(df["volume"] <= 0) | np.isnan(df["volume"]), columns] = np.nan
+        columns += ["change"]
+        df.loc[(df["volume"] <= 0) | np.isnan(df["volume"]), columns] = np.nan
 
-            df[symbol_field_name] = symbol
-            df.index.names = [date_field_name]
-            return df.reset_index()
-            
-        except Exception as e:
-            logger.error(f"Critical error in normalize_yahoo: {e}")
-            # Return empty DataFrame with proper structure
-            return pd.DataFrame(columns=[date_field_name, symbol_field_name] + YahooNormalize.COLUMNS + ["change"])
+        df[symbol_field_name] = symbol
+        df.index.names = [date_field_name]
+        return df.reset_index()
 
     def normalize(self, df: pd.DataFrame) -> pd.DataFrame:
-        try:
-            # normalize
-            df = self.normalize_yahoo(df, self._calendar_list, self._date_field_name, self._symbol_field_name)
-            # adjusted price
-            df = self.adjusted_price(df)
-            return df
-        except Exception as e:
-            logger.error(f"Error in base normalize method: {e}")
-            # Return empty DataFrame with proper structure
-            try:
-                columns = [self._date_field_name, self._symbol_field_name] + self.COLUMNS + ["change"]
-            except:
-                columns = ["date", "symbol", "open", "close", "high", "low", "volume", "change"]
-            return pd.DataFrame(columns=columns)
+        # normalize
+        df = self.normalize_yahoo(df, self._calendar_list, self._date_field_name, self._symbol_field_name)
+        # adjusted price
+        df = self.adjusted_price(df)
+        return df
 
     @abc.abstractmethod
     def adjusted_price(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -516,7 +462,7 @@ class YahooNormalize1d(YahooNormalize, ABC):
         df.set_index(self._date_field_name, inplace=True)
         if "adjclose" in df:
             df["factor"] = df["adjclose"] / df["close"]
-            df["factor"] = df["factor"].fillna(method="ffill")
+            df["factor"] = df["factor"].ffill()
         else:
             df["factor"] = 1
         for _col in self.COLUMNS:
@@ -584,96 +530,30 @@ class YahooNormalize1dExtend(YahooNormalize1d):
         self.old_qlib_data = self._get_old_data(old_qlib_data_dir)
 
     def _get_old_data(self, qlib_data_dir: [str, Path]):
-        try:
-            qlib_data_dir = str(Path(qlib_data_dir).expanduser().resolve())
-            qlib.init(provider_uri=qlib_data_dir, expression_cache=None, dataset_cache=None)
-            df = D.features(D.instruments("all"), ["$" + col for col in self.column_list])
-            df.columns = self.column_list
-            return df
-        except Exception as e:
-            logger.warning(f"Failed to load old qlib data: {e}")
-            # Return empty DataFrame if loading fails
-            return pd.DataFrame()
+        qlib_data_dir = str(Path(qlib_data_dir).expanduser().resolve())
+        qlib.init(provider_uri=qlib_data_dir, expression_cache=None, dataset_cache=None)
+        df = D.features(D.instruments("all"), ["$" + col for col in self.column_list])
+        df.columns = self.column_list
+        return df
 
     def normalize(self, df: pd.DataFrame) -> pd.DataFrame:
-        try:
-            df = super(YahooNormalize1dExtend, self).normalize(df)
-            
-            # Check if old data is available - fix the bug here
-            try:
-                old_data_empty = self.old_qlib_data is None or self.old_qlib_data.empty
-            except AttributeError:
-                # If self.old_qlib_data doesn't have .empty attribute, assume it's not a DataFrame
-                old_data_empty = self.old_qlib_data is None
-            
-            if old_data_empty:
-                logger.warning("No old qlib data available, skipping extend normalization")
-                return df
-                
-            # Check if input DataFrame is empty
-            if df.empty:
-                logger.warning("Input DataFrame is empty, returning empty DataFrame")
-                return pd.DataFrame()
-                
-            df.set_index(self._date_field_name, inplace=True)
-            
-            # Check if DataFrame is empty after setting index
-            if df.empty:
-                logger.warning("DataFrame is empty after setting index")
-                return pd.DataFrame()
-                
-            symbol_name = df[self._symbol_field_name].iloc[0]
-            old_symbol_list = self.old_qlib_data.index.get_level_values("instrument").unique().to_list()
-            if str(symbol_name).upper() not in old_symbol_list:
-                logger.info(f"Symbol {symbol_name} not found in old data, returning original data")
-                return df.reset_index()
-            
-            try:
-                old_df = self.old_qlib_data.loc[str(symbol_name).upper()]
-                
-                # Check if old_df is empty
-                if old_df.empty:
-                    logger.warning(f"No old data for symbol {symbol_name}")
-                    return df.reset_index()
-                    
-                latest_date = old_df.index[-1]
-                
-                # Check if the latest_date exists in the new data
-                if latest_date not in df.index:
-                    logger.warning(f"Latest date {latest_date} not found in new data for symbol {symbol_name}, returning original data")
-                    return df.reset_index()
-                    
-                df = df.loc[latest_date:]
-                
-                # Check if we have data after filtering
-                if df.empty:
-                    logger.warning(f"No data after filtering for symbol {symbol_name}")
-                    return pd.DataFrame()
-                    
-                new_latest_data = df.iloc[0]
-                old_latest_data = old_df.loc[latest_date]
-                
-                for col in self.column_list[:-1]:
-                    if col in new_latest_data and col in old_latest_data:
-                        if (new_latest_data[col] != 0 and not pd.isna(new_latest_data[col]) and 
-                            old_latest_data[col] != 0 and not pd.isna(old_latest_data[col])):
-                            if col == "volume":
-                                df[col] = df[col] / (new_latest_data[col] / old_latest_data[col])
-                            else:
-                                df[col] = df[col] * (old_latest_data[col] / new_latest_data[col])
-                return df.drop(df.index[0]).reset_index()
-                
-            except KeyError as e:
-                logger.warning(f"KeyError when processing symbol {symbol_name}: {e}, returning original data")
-                return df.reset_index()
-            except Exception as e:
-                logger.warning(f"Unexpected error when processing symbol {symbol_name}: {e}, returning original data")
-                return df.reset_index()
-                
-        except Exception as e:
-            logger.error(f"Critical error in normalize method: {e}, returning empty DataFrame")
-            # Return an empty DataFrame with the correct columns to avoid further issues
-            return pd.DataFrame(columns=[self._date_field_name, self._symbol_field_name] + self.column_list)
+        df = super(YahooNormalize1dExtend, self).normalize(df)
+        df.set_index(self._date_field_name, inplace=True)
+        symbol_name = df[self._symbol_field_name].iloc[0]
+        old_symbol_list = self.old_qlib_data.index.get_level_values("instrument").unique().to_list()
+        if str(symbol_name).upper() not in old_symbol_list:
+            return df.reset_index()
+        old_df = self.old_qlib_data.loc[str(symbol_name).upper()]
+        latest_date = old_df.index[-1]
+        df = df.loc[latest_date:]
+        new_latest_data = df.iloc[0]
+        old_latest_data = old_df.loc[latest_date]
+        for col in self.column_list[:-1]:
+            if col == "volume":
+                df[col] = df[col] / (new_latest_data[col] / old_latest_data[col])
+            else:
+                df[col] = df[col] * (old_latest_data[col] / new_latest_data[col])
+        return df.drop(df.index[0]).reset_index()
 
 
 class YahooNormalize1min(YahooNormalize, ABC):
@@ -743,12 +623,8 @@ class YahooNormalize1min(YahooNormalize, ABC):
 
 class YahooNormalizeUS:
     def _get_calendar_list(self) -> Iterable[pd.Timestamp]:
-        try:
-            # TODO: from MSN
-            return get_calendar_list("US_ALL")
-        except Exception as e:
-            logger.warning(f"Failed to get US calendar list: {e}, using empty list")
-            return []
+        # TODO: from MSN
+        return get_calendar_list("US_ALL")
 
 
 class YahooNormalizeUS1d(YahooNormalizeUS, YahooNormalize1d):
@@ -1136,7 +1012,7 @@ class Run(BaseRun):
         if _region not in ["cn", "us"]:
             logger.warning(f"Unsupported region: region={_region}, component downloads will be ignored")
             return
-        index_list = ["CSI100", "CSI300"] if _region == "cn" else ["SP500", "NASDAQ100", "DJIA", "SP400"]
+        index_list = ["CSI100", "CSI300"] if _region == "cn" else ["SP500", "DJIA", "SP400"] #"NASDAQ100",
         get_instruments = getattr(
             importlib.import_module(f"data_collector.{_region}_index.collector"), "get_instruments"
         )

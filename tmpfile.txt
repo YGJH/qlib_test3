@@ -1,0 +1,69 @@
+
+以下是訓練時出錯:
+{
+[pytorch_transformer_ts.py:192] - training...     
+[pytorch_transformer_ts.py:196] - Epoch0:
+[pytorch_transformer_ts.py:197] - training...     
+[pytorch_transformer_ts.py:199] - evaluating...
+/mnt/c/Users/charless/Documents/qlib_test3/.venv/lib/python3.12/site-packages/numpy/_core/fromnumeric.py:3859: RuntimeWarning:
+Mean of empty slice.
+[pytorch_transformer_ts.py:202] - train -1.002599, valid nan
+[pytorch_transformer_ts.py:196] - Epoch1:
+[pytorch_transformer_ts.py:197] - training...     
+[pytorch_transformer_ts.py:199] - evaluating...
+[pytorch_transformer_ts.py:202] - train -0.992867, valid nan}
+以下是關於dataset的資訊
+{
+    選擇40支股票其中:
+
+    標籤統計信息:
+  - 標籤形狀: (27096, 1)
+  - 標籤均值: 0.010060
+  - 標籤標準差: 1.307230
+  - 標籤範圍: [-3.000000, 3.000000]
+  - 缺失值數量: 0
+  - 正值比例: 0.4794
+  - 零值比例: 0.0293
+  - 負值比例: 0.4913
+  ___________________________
+
+  前幾支股票的開盤價:
+                         $close   $factor     $high      $low     $open       $volume
+instrument datetime
+adtn       2025-06-18  1.043952  0.041052  1.048879  1.010700  1.019321  1.788463e+07
+aeis       2025-06-18  0.193909  0.020305  0.195533  0.189442  0.191878  9.224525e+06
+aht        2025-06-18  1.006638  0.018061  1.010031  0.972706  0.972706  7.640698e+05
+amzn       2025-06-18  0.487356  0.013136  0.488670  0.466995  0.468834  7.666092e+08
+
+Verification data shape: (34704, 5)
+}
+
+以下是在創建model時出現的一些warning{
+    /mnt/c/Users/charless/Documents/qlib_test3/.venv/lib/python3.12/site-packages/torch/nn/modules/transformer.py:382: UserWarning:
+    enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.self_attn.batch_first was not True(use batch_first for better inference performance)
+
+
+/mnt/c/Users/charless/Documents/qlib_test3/.venv/lib/python3.12/site-packages/qlib/contrib/model/pytorch_transformer_ts.py:152: FutureWarning:
+
+DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.     
+
+/mnt/c/Users/charless/Documents/qlib_test3/.venv/lib/python3.12/site-packages/qlib/contrib/model/pytorch_transformer_ts.py:153: FutureWarning:
+
+DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.     
+
+/mnt/c/Users/charless/Documents/qlib_test3/.venv/lib/python3.12/site-packages/torch/utils/data/dataloader.py:626: UserWarning:
+
+This DataLoader will create 10 worker processes in total. Our suggested max number of worker in current system is 8, which is smaller than what this DataLoader is going to create. Please be aware that excessive worker creation might get DataLoader running slow or even freeze, lower the worker number to avoid potential slowness/freeze if necessary.
+}
+請問在training時，為什麼會出現mean of empty slice，而且似乎之後的epoch在計算valid跟train的score時也跟著出錯了
+
+
+
+mse: 1.058678
+mse: 1.093633
+mse: 0.696375
+mse: 0.902032
+mse: 0.847211...
+[pytorch_transformer_ts.py:206] - train -0.995198, valid -1.008472
+[pytorch_transformer_ts.py:200] - Epoch3:
+[pytorch_transformer_ts.py:201] - training...     

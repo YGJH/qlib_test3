@@ -26,7 +26,7 @@ from data_collector.utils import get_instruments
 WIKI_URL = "https://en.wikipedia.org/wiki"
 
 WIKI_INDEX_NAME_MAP = {
-    "NASDAQ100": "NASDAQ-100",
+    # "NASDAQ100": "NASDAQ-100",
     "SP500": "List_of_S%26P_500_companies",
     "SP400": "List_of_S%26P_400_companies",
     "DJIA": "Dow_Jones_Industrial_Average",

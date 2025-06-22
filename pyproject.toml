@@ -6,8 +6,10 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "catboost>=1.2.8",
+    "markdown>=3.8.2",
     "plotly>=6.1.2",
     "pyqlib>=0.9.6",
+    "scikit-learn>=1.7.0",
     "statsmodels>=0.14.4",
     "torch>=2.7.1",
     "xgboost>=3.0.2",

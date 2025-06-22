@@ -97,6 +97,8 @@ class BaostockCollectorHS3005min(BaseCollector):
         df = self.get_data_from_remote(
             symbol=symbol, interval=interval, start_datetime=start_datetime, end_datetime=end_datetime
         )
+        logger.info(f"Start datetime: {self.start_datetime}, End datetime: {self.end_datetime}")
+        logger.info(f"Downloaded data shape: {df.shape}")
         df.columns = ["date", "time", "symbol", "open", "high", "low", "close", "volume", "amount", "adjustflag"]
         df["time"] = pd.to_datetime(df["time"], format="%Y%m%d%H%M%S%f")
         df["date"] = df["time"].dt.strftime("%Y-%m-%d %H:%M:%S")

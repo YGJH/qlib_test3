@@ -8,13 +8,14 @@ from pathlib import Path
 from typing import Iterable, List, Union
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExecutor
+import os
 
 import fire
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from loguru import logger
-from qlib.utils import fname_to_code, code_to_fname
+from qlib.utils import fname_to_code, code_to_fname, exists_qlib_data  # Add this import
 
 
 class DumpDataBase:
@@ -357,149 +358,161 @@ class DumpDataFix(DumpDataAll):
 
 
 class DumpDataUpdate(DumpDataBase):
-    def __init__(
-        self,
-        csv_path: str,
-        qlib_dir: str,
-        backup_dir: str = None,
-        freq: str = "day",
-        max_workers: int = 16,
-        date_field_name: str = "date",
-        file_suffix: str = ".csv",
-        symbol_field_name: str = "symbol",
-        exclude_fields: str = "",
-        include_fields: str = "",
-        limit_nums: int = None,
-    ):
-        """
+    def __init__(self, csv_path: str, qlib_dir: str, backup_dir: str = None, freq: str = "day",
+                 max_workers: int = 16, date_field_name: str = "date", file_suffix: str = ".csv",
+                 symbol_field_name: str = "symbol", exclude_fields: str = "", include_fields: str = "",
+                 limit_nums: int = None):
+        super().__init__(csv_path, qlib_dir, backup_dir, freq, max_workers,
+                         date_field_name, file_suffix, symbol_field_name,
+                         exclude_fields, include_fields)
+        # Initialize _expected_columns
+        if include_fields:
+            self._expected_columns = [self.date_field_name, self.symbol_field_name] + [col.strip() for col in include_fields.split(",")]
+        else:
+            self._expected_columns = [self.date_field_name, self.symbol_field_name, "open", "close", "high", "low", "volume", "change"]
+        
+        # Initialize _update_instruments
+        self._update_instruments = {}
+        
+        # Initialize _old_calendar_list from existing qlib data
+        try:
+            # Try to load existing calendar from qlib data
+            if exists_qlib_data(self.qlib_dir):
+                calendar_path = Path(self.qlib_dir) / "calendars" / f"{freq}.txt"
+                if calendar_path.exists():
+                    with open(calendar_path, 'r') as f:
+                        self._old_calendar_list = [line.strip() for line in f.readlines()]
+                else:
+                    # Create a default calendar list
+                    self._old_calendar_list = []
+            else:
+                self._old_calendar_list = []
+        except Exception as e:
+            logger.warning(f"Failed to load old calendar list: {e}, using empty list")
+            self._old_calendar_list = []
 
-        Parameters
-        ----------
-        csv_path: str
-            stock data path or directory
-        qlib_dir: str
-            qlib(dump) data director
-        backup_dir: str, default None
-            if backup_dir is not None, backup qlib_dir to backup_dir
-        freq: str, default "day"
-            transaction frequency
-        max_workers: int, default None
-            number of threads
-        date_field_name: str, default "date"
-            the name of the date field in the csv
-        file_suffix: str, default ".csv"
-            file suffix
-        symbol_field_name: str, default "symbol"
-            symbol field name
-        include_fields: tuple
-            dump fields
-        exclude_fields: tuple
-            fields not dumped
-        limit_nums: int
-            Use when debugging, default None
-        """
-        super().__init__(
-            csv_path,
-            qlib_dir,
-            backup_dir,
-            freq,
-            max_workers,
-            date_field_name,
-            file_suffix,
-            symbol_field_name,
-            exclude_fields,
-            include_fields,
-        )
-        self._mode = self.UPDATE_MODE
-        self._old_calendar_list = self._read_calendars(self._calendars_dir.joinpath(f"{self.freq}.txt"))
-        # NOTE: all.txt only exists once for each stock
-        # NOTE: if a stock corresponds to multiple different time ranges, user need to modify self._update_instruments
-        self._update_instruments = (
-            self._read_instruments(self._instruments_dir.joinpath(self.INSTRUMENTS_FILE_NAME))
-            .set_index([self.symbol_field_name])
-            .to_dict(orient="index")
-        )  # type: dict
+        # Load all csv files
+        self._all_data = self._load_all_source_data()
+        
+        # Update calendar list
+        if not self._all_data.empty and self._old_calendar_list:
+            try:
+                new_dates = sorted(filter(
+                    lambda x: x > self._old_calendar_list[-1], 
+                    self._all_data[self.date_field_name].unique()
+                ))
+                self._new_calendar_list = self._old_calendar_list + new_dates
 
-        # load all csv files
-        self._all_data = self._load_all_source_data()  # type: pd.DataFrame
-        self._new_calendar_list = self._old_calendar_list + sorted(
-            filter(lambda x: x > self._old_calendar_list[-1], self._all_data[self.date_field_name].unique())
-        )
+            except (IndexError, TypeError):
+                # If _old_calendar_list is empty or comparison fails
+                self._new_calendar_list = sorted(self._all_data[self.date_field_name].unique())
+        else:
+            if not self._all_data.empty:
+                self._new_calendar_list = sorted(self._all_data[self.date_field_name].unique())
+            else:
+                self._new_calendar_list = self._old_calendar_list
+        
+        self._kwargs["all_datetime_set"] = set(self._new_calendar_list)
 
-    def _load_all_source_data(self):
-        # NOTE: Need more memory
+    def _load_all_source_data(self) -> pd.DataFrame:
         logger.info("start load all source data....")
         all_df = []
 
         def _read_csv(file_path: Path):
-            _df = pd.read_csv(file_path, parse_dates=[self.date_field_name])
-            if self.symbol_field_name not in _df.columns:
-                _df[self.symbol_field_name] = self.get_symbol_from_file(file_path)
-            return _df
+            try:
+                _df = pd.read_csv(file_path, parse_dates=[self.date_field_name])
+                if self.symbol_field_name not in _df.columns:
+                    _df[self.symbol_field_name] = self.get_symbol_from_file(file_path)
+                return _df
+            except Exception as e:
+                logger.warning(f"Failed to read {file_path}: {e}")
+                return pd.DataFrame()
 
         with tqdm(total=len(self.csv_files)) as p_bar:
             with ThreadPoolExecutor(max_workers=self.works) as executor:
                 for df in executor.map(_read_csv, self.csv_files):
                     if not df.empty:
                         all_df.append(df)
+                        # Update _update_instruments with symbol info
+                        if self.symbol_field_name in df.columns:
+                            symbol = df[self.symbol_field_name].iloc[0]
+                            self._update_instruments[symbol] = {
+                                'start_datetime': df[self.date_field_name].min(),
+                                'end_datetime': df[self.date_field_name].max(),
+                                'count': len(df)
+                            }
                     p_bar.update()
 
         logger.info("end of load all data.\n")
+        if not all_df:
+            logger.warning("No valid source data files found. Returning empty DataFrame.")
+            return pd.DataFrame(columns=self._expected_columns)
         return pd.concat(all_df, sort=False)
 
+    def dump(self):
+        """
+        Dump data to qlib format
+        """
+        try:
+            if self._all_data.empty:
+                logger.warning("No data to dump, skipping...")
+                return
+
+            logger.info("start dump data......")
+            self._dump_calendars()
+            self._dump_features()
+
+            # Create DataFrame from _update_instruments with proper columns
+            if self._update_instruments:
+                df = pd.DataFrame.from_dict(self._update_instruments, orient="index")
+                # Make the dict-keys become the symbol column
+                df.index.name = self.symbol_field_name
+                df = df.reset_index()
+                # Drop auxiliary fields (e.g. 'count')
+                for aux in ["count"]:
+                    if aux in df.columns:
+                        df = df.drop(columns=[aux])
+
+                # Ensure start/end fields exist
+                if self.INSTRUMENTS_START_FIELD not in df.columns:
+                    df[self.INSTRUMENTS_START_FIELD] = df[self.symbol_field_name].map(
+                        lambda x: self._all_data[self._all_data[self.symbol_field_name] == x][self.date_field_name].min()
+                    )
+                if self.INSTRUMENTS_END_FIELD not in df.columns:
+                    df[self.INSTRUMENTS_END_FIELD] = df[self.symbol_field_name].map(
+                        lambda x: self._all_data[self._all_data[self.symbol_field_name] == x][self.date_field_name].max()
+                    )
+                # Write out instruments.csv
+                self.save_instruments(df)
+            else:
+                logger.warning("No instruments to save")
+
+            logger.info("end of dump data.")
+        except Exception as e:
+            logger.error(f"Error during dump: {e}")
+
+
+
     def _dump_calendars(self):
-        pass
+        logger.info("start dump calendars......")
+        self._calendars_list = sorted(map(pd.Timestamp, self._kwargs["all_datetime_set"]))
+        self.save_calendars(self._calendars_list)
+        logger.info("end of calendars dump.\n")
 
     def _dump_instruments(self):
-        pass
+        logger.info("start dump instruments......")
+        self.save_instruments(self._kwargs["date_range_list"])
+        logger.info("end of instruments dump.\n")
 
     def _dump_features(self):
         logger.info("start dump features......")
-        error_code = {}
-        with ProcessPoolExecutor(max_workers=self.works) as executor:
-            futures = {}
-            for _code, _df in self._all_data.groupby(self.symbol_field_name, group_keys=False):
-                _code = fname_to_code(str(_code).lower()).upper()
-                _start, _end = self._get_date(_df, is_begin_end=True)
-                if not (isinstance(_start, pd.Timestamp) and isinstance(_end, pd.Timestamp)):
-                    continue
-                if _code in self._update_instruments:
-                    # exists stock, will append data
-                    _update_calendars = (
-                        _df[_df[self.date_field_name] > self._update_instruments[_code][self.INSTRUMENTS_END_FIELD]][
-                            self.date_field_name
-                        ]
-                        .sort_values()
-                        .to_list()
-                    )
-                    if _update_calendars:
-                        self._update_instruments[_code][self.INSTRUMENTS_END_FIELD] = self._format_datetime(_end)
-                        futures[executor.submit(self._dump_bin, _df, _update_calendars)] = _code
-                else:
-                    # new stock
-                    _dt_range = self._update_instruments.setdefault(_code, dict())
-                    _dt_range[self.INSTRUMENTS_START_FIELD] = self._format_datetime(_start)
-                    _dt_range[self.INSTRUMENTS_END_FIELD] = self._format_datetime(_end)
-                    futures[executor.submit(self._dump_bin, _df, self._new_calendar_list)] = _code
-
-            with tqdm(total=len(futures)) as p_bar:
-                for _future in as_completed(futures):
-                    try:
-                        _future.result()
-                    except Exception:
-                        error_code[futures[_future]] = traceback.format_exc()
+        _dump_func = partial(self._dump_bin, calendar_list=self._calendars_list)
+        with tqdm(total=len(self.csv_files)) as p_bar:
+            with ProcessPoolExecutor(max_workers=self.works) as executor:
+                for _ in executor.map(_dump_func, self.csv_files):
                     p_bar.update()
-            logger.info(f"dump bin errors: {error_code}")
 
         logger.info("end of features dump.\n")
-
-    def dump(self):
-        self.save_calendars(self._new_calendar_list)
-        self._dump_features()
-        df = pd.DataFrame.from_dict(self._update_instruments, orient="index")
-        df.index.names = [self.symbol_field_name]
-        self.save_instruments(df.reset_index())
-
 
 if __name__ == "__main__":
     fire.Fire({"dump_all": DumpDataAll, "dump_fix": DumpDataFix, "dump_update": DumpDataUpdate})

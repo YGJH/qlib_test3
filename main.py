@@ -5,6 +5,7 @@ import qlib  # Uncomment this line
 import pandas as pd
 import numpy as np
 import json
+import random
 from qlib.constant import REG_US
 from qlib.utils import exists_qlib_data, init_instance_by_config
 from qlib.workflow import R
@@ -13,8 +14,15 @@ from qlib.utils import flatten_dict
 from qlib.contrib.report import analysis_model, analysis_position
 from qlib.data import D
 import subprocess
-
+from qlib.contrib.model.double_ensemble import DEnsembleModel
+from qlib.contrib.model.gbdt import LGBModel
+from qlib.contrib.data.handler import Alpha158
+from config_task import get_task, get_date, get_data_handler_config, test_data
+from colors import Colors, print_green, print_yellow, print_red, warn_with_color
 # Try to import sklearn, if not available use basic metrics
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Set to 0 for single GPU usage, or adjust as needed
+
 try:
     from sklearn.metrics import mean_squared_error, r2_score
     SKLEARN_AVAILABLE = True
@@ -22,31 +30,53 @@ except ImportError:
     SKLEARN_AVAILABLE = False
     print("sklearn not available, using basic metrics only")
 
-# 顏色輸出功能
-class Colors:
-    RED = '\033[91m'
-    YELLOW = '\033[93m'
-    GREEN = '\033[92m'
-    BLUE = '\033[94m'
-    MAGENTA = '\033[95m'
-    CYAN = '\033[96m'
-    WHITE = '\033[97m'
-    ENDC = '\033[0m'  # 結束顏色
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+print("SKLEARN_AVAILABLE:", SKLEARN_AVAILABLE)
 
-def print_green(text):
-    print(f"{Colors.GREEN}{text}{Colors.ENDC}")
+def time_series_cv_validation(dataset, model_config, n_splits=3):
+    """時間序列交叉驗證"""
+    
+    # 獲取時間範圍
+    train_start = pd.to_datetime(start_date_str)
+    train_end = pd.to_datetime(train_end_date_str)
+    
+    # 分割時間段
+    total_days = (train_end - train_start).days
+    split_size = total_days // n_splits
+    
+    cv_results = []
+    
+    for i in range(n_splits):
+        fold_start = train_start + pd.Timedelta(days=i * split_size)
+        fold_end = train_start + pd.Timedelta(days=(i + 1) * split_size)
+        
+        print(f"Fold {i+1}: {fold_start.strftime('%Y-%m-%d')} to {fold_end.strftime('%Y-%m-%d')}")
+        
+        # 訓練和驗證該fold
+        # 這裡需要根據具體情況調整
+        
+    return cv_results
+    return retrain_task
 
-def print_yellow(text):
-    print(f"{Colors.YELLOW}{text}{Colors.ENDC}")
+def analyze_label_quality(dataset):
+    """分析標籤質量"""
+    try:
+        labels = dataset.prepare("train", col_set="label")
+        print_green(f"標籤統計信息:")
+        print(f"  - 標籤形狀: {labels.shape}")
+        print(f"  - 標籤均值: {labels.mean().iloc[0]:.6f}")
+        print(f"  - 標籤標準差: {labels.std().iloc[0]:.6f}")
+        print(f"  - 標籤範圍: [{labels.min().iloc[0]:.6f}, {labels.max().iloc[0]:.6f}]")
+        print(f"  - 缺失值數量: {labels.isnull().sum().iloc[0]}")
+        
+        # 檢查標籤分佈
+        label_values = labels.iloc[:, 0].values
+        print(f"  - 正值比例: {(label_values > 0).mean():.4f}")
+        print(f"  - 零值比例: {(label_values == 0).mean():.4f}")
+        print(f"  - 負值比例: {(label_values < 0).mean():.4f}")
+        
+    except Exception as e:
+        print(f"標籤分析失敗: {e}")
 
-def print_red(text):
-    print(f"{Colors.RED}{text}{Colors.ENDC}")
-
-def warn_with_color(message, category=UserWarning):
-    print_red(f"WARNING: {message}")
-    warnings.warn(message, category)
 
 
 def get_data():
@@ -81,10 +111,35 @@ def get_data():
 provider_uri = ".qlib/qlib_data/us_data"  # target_dir
 qlib.init(provider_uri=provider_uri, region=REG_US)
 
+def analyze_feature_importance(model, dataset):
+    """分析特徵重要性"""
+    try:
+        # 獲取特徵重要性
+        importance = model.model.feature_importance(importance_type='gain')
+        feature_names = dataset.prepare("train").columns
+        
+        # 創建重要性DataFrame
+        importance_df = pd.DataFrame({
+            'feature': feature_names,
+            'importance': importance
+        }).sort_values('importance', ascending=False)
+        
+        print_green("前20個最重要特徵:")
+        print(importance_df.head(20))
+        
+        # 檢查是否有特徵被忽略
+        zero_importance = (importance_df['importance'] == 0).sum()
+        print_yellow(f"零重要性特徵數量: {zero_importance}")
+        
+        return importance_df
+        
+    except Exception as e:
+        print(f"特徵重要性分析失敗: {e}")
+        return None
 
 
-import json
-import pandas as pd
+
+model = "Transformer"  # Default model
 
 # Check which instruments are available in the data
 print_green("Checking available instruments...")
@@ -116,14 +171,14 @@ try:
         raise FileNotFoundError("Instruments file missing")
     
     # Filter to common US stocks (remove indices that start with ^ and _)
-    us_stocks = [inst for inst in available_instruments if not inst.startswith('^') and not inst.startswith('_')]
+    us_stocks = available_instruments
     print_green(f"Filtered to {len(us_stocks)} US stocks (excluding indices)")
 
     if len(us_stocks) > 0:
-        # Use a subset for testing - limit to reasonable number
-        market = us_stocks[:20] if len(us_stocks) > 20 else us_stocks
-        print_green(f"Using {len(market)} instruments: {market}")
-        
+        market = us_stocks
+        market = random.sample(market, min(40, len(market)))
+        # market = market[:min(40, len(market))]  # Limit to 400 stocks
+
         # 驗證這些symbols是否真的有數據
         print_green("Verifying data availability for selected instruments...")
         valid_instruments = []
@@ -136,7 +191,7 @@ try:
         
         if len(valid_instruments) > 0:
             market = valid_instruments
-            print_green(f"Final selection: {len(market)} instruments with data: {market}")
+            print_green(f"Final selection: {len(market)} instruments with data: {market[:min(10, len(market))]}")
             # Use the first available instrument as benchmark since SPY might not be available
             benchmark = market[0] if len(market) > 0 else None
         else:
@@ -150,208 +205,64 @@ except Exception as e:
     warn_with_color(f"Error reading instruments from file: {e}")
     print_yellow("Using hardcoded fallback configuration...")
     market = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]  # Hardcoded fallback
-    benchmark = market[0]  # Use first available instrument as benchmark
-
-# Calculate date ranges for training and validation
-start_date = pd.Timestamp("2021-06-01")  # Match data collector start date
-today = pd.Timestamp.now().normalize()  # Normalize to remove time component
-
-# Check if we have sufficient data range
-min_days = 100  # Minimum required days
-total_days = (today - start_date).days
-if total_days < min_days:
-    print_yellow(f"Warning: Only {total_days} days of data available, adjusting date range...")
-    start_date = today - pd.Timedelta(days=min_days)
-
-# Use 80% for training, 20% for validation
-train_ratio = 0.8
-train_days = int(total_days * train_ratio)
-train_end_date = start_date + pd.Timedelta(days=train_days)
-
-# Ensure we don't go into the future
-if train_end_date >= today:
-    train_end_date = today - pd.Timedelta(days=10)
-
-# Ensure dates are properly formatted
-start_date_str = start_date.strftime("%Y-%m-%d")
-train_end_date_str = train_end_date.strftime("%Y-%m-%d") 
-today_str = today.strftime("%Y-%m-%d")
-
-print_green(f"Data range: {start_date_str} to {today_str}")
-print_green(f"Training: {start_date_str} to {train_end_date_str}")
-print_green(f"Validation: {train_end_date_str} to {today_str}")
-
-###################################
-# train model
-###################################
-
-# Test data availability first
-print_green("Testing data availability...")
-try:
-    # Use the market list we already have from all.txt file (which contains valid stocks)
-    print_green(f"Using instruments from all.txt file: {len(market)}")
-    
-    if len(market) > 0:
-        print_green(f"Sample instruments: {market[:10]}")
-        
-        # Test with a few instruments from our list
-        test_instruments = market[:5] if len(market) >= 5 else market
-        print_green(f"Testing with instruments: {test_instruments}")
-        
-        # Try a very recent date range
-        test_end = today
-        test_start = today - pd.Timedelta(days=7)
-        
-        test_data = D.features(
-            test_instruments,
-            ["$close", "$open"],
-            start_time=test_start.strftime("%Y-%m-%d"),
-            end_time=test_end.strftime("%Y-%m-%d"),
-            freq="day"
-        )
-        print_green(f"Test data shape: {test_data.shape}")
-        print_green(f"Test data columns: {test_data.columns.tolist()}")
-        
-        if not test_data.empty:
-            print_green("Data is available! Using successful configuration.")
-            # Don't change the date range to the test dates - keep the original broader range
-            # The test was just to verify data availability
-            print_green("Keeping original date range for sufficient training data")
-        else:
-            warn_with_color("Test data is empty even with recent dates")
-            raise ValueError("Test data is empty even with recent dates")
-    else:
-        warn_with_color("No instruments found in the market list")
-        raise ValueError("No instruments found in the market list")
-        
-except Exception as e:
-    warn_with_color(f"Data availability test failed: {e}")
-    print_yellow("Trying to use existing data files directly...")
-    
-    # Check what's actually available in the features directory
-    features_dir = Path(".qlib/qlib_data/us_data/features")
-    if features_dir.exists():
-        available_stocks = []
-        for item in features_dir.iterdir():
-            if item.is_dir() and not item.name.startswith('.') and not item.name.startswith('_'):
-                # Check if this directory has actual data files
-                data_files = list(item.glob("*.bin"))
-                if len(data_files) > 0:
-                    available_stocks.append(item.name.upper())
-        
-        if available_stocks:
-            print_green(f"Found {len(available_stocks)} stocks with actual data files")
-            print_green(f"Available stocks: {available_stocks[:10]}")
-            market = available_stocks[:20]  # Use top 20 stocks with data
-            benchmark = market[0]  # Use first available stock as benchmark
-        else:
-            warn_with_color("No stocks found with data files")
-            market = ["AAPL", "MSFT", "GOOGL"]  # Fallback
-            benchmark = market[0]  # Use first fallback stock as benchmark
-    else:
-        warn_with_color("Features directory not found")
-        market = ["AAPL", "MSFT", "GOOGL"]  # Fallback
-        benchmark = market[0]  # Use first fallback stock as benchmark
-    
-    # Keep the original broader date range - don't narrow it down for fallback
-    print_green(f"Using fallback configuration with {len(market)} instruments")
-    print_green(f"Keeping original broader date range: {start_date_str} to {today_str}")
+    benchmark = random.choice(market)  # Randomly select a benchmark from the fallback list
 
 
+
+
+start_date_str, train_end_date_str, today_str, today = get_date()
+
+data_handler_config = get_data_handler_config(market=market,
+                                              start_date_str=start_date_str,
+                                              train_end_date_str=train_end_date_str)
+test_data(
+    market=market,
+    start_date_str=start_date_str,
+    today_str=today_str,
+)
+task = get_task(
+    start_date_str=start_date_str,
+    train_end_date_str=train_end_date_str,
+    today_str=today_str,
+    data_handler_config=data_handler_config,
+    today=today,
+    market=market,
+    model=model
+)
 print_green("Initializing model and dataset...")
 print_green(f"Final configuration:")
-print_green(f"  - Market: {market}")
+print_green(f"  - Market: {market[:min(10 , len(market))]}")
 print_green(f"  - Benchmark: {benchmark}")
 print_green(f"  - Date range: {start_date_str} to {today_str}")
 print_green(f"  - Training: {start_date_str} to {train_end_date_str}")
-print_green(f"  - Validation: {train_end_date_str} to {today_str}")
 
-data_handler_config = {
-    "start_time": start_date_str,
-    "end_time": today_str,
-    "fit_start_time": start_date_str, 
-    "fit_end_time": train_end_date_str,
-    "instruments": market,
-    "drop_raw": False,
-}
 
-# Verify data one more time with the handler configuration
-print_green("Verifying data with handler configuration...")
+
 try:
-    verification_data = D.features(
-        market,
-        ["$close", "$open", "$high", "$low", "$volume"],
-        start_time=start_date_str,
+    # 指定資料目錄
+    features_dir = ".qlib/qlib_data/us_data/features"
+
+    # 選擇一個股票
+    instrument = market[0]  # 替換為您感興趣的股票代碼
+    instrument_dir = os.path.join(features_dir, instrument.lower())
+
+    # 列出特徵檔案
+    if os.path.exists(instrument_dir):
+        fields = [f.split(".")[0] for f in os.listdir(instrument_dir) if f.endswith(".bin")]
+        print(f"支持的因子字段: {fields}")
+    else:
+        print(f"未找到股票 {instrument} 的特徵資料")
+    stock_data = D.features(
+        instruments=market,
+        fields=['$close', '$factor', '$high', '$low', '$open', '$volume'],
+        start_time=(pd.Timestamp.now()-pd.Timedelta(days=5)).strftime("%Y-%m-%d"),
         end_time=today_str,
         freq="day"
     )
-    print_green(f"Verification data shape: {verification_data.shape}")
-    if verification_data.empty:
-        warn_with_color("Verification failed: No data available")
-        raise ValueError("Verification failed: No data available")
-    
-    # Check data quality
-    non_null_rows = verification_data.dropna().shape[0]
-    print_green(f"Non-null rows: {non_null_rows} out of {verification_data.shape[0]}")
-    
-    # If verification succeeds, use the current configuration
-    data_handler_config = {
-        "start_time": start_date_str,
-        "end_time": today_str,
-        "fit_start_time": start_date_str, 
-        "fit_end_time": train_end_date_str,
-        "instruments": market,
-        "drop_raw": False,
-    }
-    
+    print("前幾支股票的開盤價:")
+    print(stock_data)
 except Exception as e:
-    warn_with_color(f"Verification failed: {e}")
-    # Create a minimal fallback but keep reasonable date range
-    print_yellow("Creating minimal fallback configuration...")
-    market = ["AAPL"]  # Single stock
-    benchmark = market[0]  # Use the single stock as benchmark
-    # Keep the original broader date range even for fallback
-    
-    data_handler_config = {
-        "start_time": start_date_str,
-        "end_time": today_str,
-        "fit_start_time": start_date_str, 
-        "fit_end_time": train_end_date_str,
-        "instruments": market,
-        "drop_raw": False,
-    }
-
-task = {
-    "model": {
-        "class": "LGBModel",
-        "module_path": "qlib.contrib.model.gbdt",
-        "kwargs": {
-            "loss": "mse",
-            "colsample_bytree": 0.8,
-            "learning_rate": 0.1,
-            "subsample": 0.8,
-            "max_depth": 32,  # Reduced complexity
-            "num_leaves": 64,  # Reduced complexity
-            "num_threads": 8,
-        },
-    },
-    "dataset": {
-        "class": "DatasetH",
-        "module_path": "qlib.data.dataset",
-        "kwargs": {
-            "handler": {
-                "class": "Alpha158",
-                "module_path": "qlib.contrib.data.handler",
-                "kwargs": data_handler_config,
-            },
-            "segments": {
-                "train": (start_date_str, train_end_date_str),
-                "valid": (train_end_date_str, today_str),
-                "test": (today_str, (today + pd.Timedelta(days=9)).strftime("%Y-%m-%d")),
-            },
-        },
-    },
-}
+    print(f"提取開盤價時發生錯誤: {e}")
 
 try:
     print_green("Creating model...")
@@ -361,7 +272,7 @@ try:
     print_green("Creating dataset...")
     dataset = init_instance_by_config(task["dataset"])
     print_green("Dataset created successfully")
-    
+    analyze_label_quality(dataset)
     # Check dataset segments
     print_green("Checking dataset segments...")
     try:
@@ -398,7 +309,7 @@ except Exception as e:
     for date in future_dates:
         date_str = date.strftime("%Y-%m-%d")
         mock_predictions[date_str] = {}
-        for stock in market[:10]:  # Limit to 10 stocks
+        for stock in market:  # Limit to 10 stocks
             # Mock prediction (neutral value around 0)
             mock_predictions[date_str][stock] = 0.0
     
@@ -409,7 +320,7 @@ except Exception as e:
         "status": "mock_predictions",
         "message": "Unable to train model due to data issues. Mock predictions generated.",
         "model_type": "MockModel",
-        "instruments_count": len(market[:10]),
+        "instruments_count": len(market),
         "instruments": market[:10],
         "prediction_period": f"{future_start.strftime('%Y-%m-%d')} to {future_end.strftime('%Y-%m-%d')}",
         "predictions": mock_predictions
@@ -459,7 +370,7 @@ port_analysis_config = {
         "start_time": train_end_date_str,
         "end_time": today_str,
         "account": 100000000,
-        "benchmark": None,  # Explicitly set benchmark to None
+        "benchmark": benchmark,  # Explicitly set benchmark to None
         "exchange_kwargs": {
             "freq": "day",
             "limit_threshold": None,  # US market has no limit threshold
@@ -478,17 +389,13 @@ with R.start(experiment_name="backtest_analysis"):
     print_green("get recorder successfully")
     model = recorder.load_object("trained_model")
     print(type(model))
-
+    sr = SignalRecord(model=model , dataset=dataset,recorder=recorder)
+    sr.generate()
+    par = PortAnaRecord(recorder, port_analysis_config)
+    par.generate()
     # Generate predictions on validation period using D.features directly
     print_green("Generating predictions on validation dataset using D.features...")
     try:
-        # val_features = D.features(
-        #     market,
-        #     ["$close", "$open", "$high", "$low", "$volume"],
-        #     start_time=train_end_date_str,
-        #     end_time=today_str,
-        #     freq="day"
-        # )
         val_features = dataset
 
         print_yellow(type(val_features))
@@ -603,7 +510,7 @@ with R.start(experiment_name="backtest_analysis"):
                 
                 # Get the latest date for each instrument
                 latest_date = today_str
-                instruments = market[:20]  # Limit to 20 instruments
+                instruments = market  # Limit to 20 instruments
                 
                 # Create multi-index for latest predictions
                 index_tuples = [(inst, latest_date) for inst in instruments]
@@ -734,22 +641,73 @@ with R.start(experiment_name="backtest_analysis"):
 
 
 
+# 準備train 第二次數據 ， 不太需要
+
+# 使用方法
+# retrain_task = create_retrain_task(task, train_end_date_str, today_str)
+
+# print_green("Starting retraining with validation data...")
+
+# # 創建新的dataset配置（包含原validation數據用於訓練）
+# retrain_task = {
+#     "model": {
+#         "class": "LGBModel",
+#         "module_path": "qlib.contrib.model.gbdt",
+#         "kwargs": task["model"]["kwargs"].copy()  # 使用相同的模型參數
+#     },
+#     "dataset": {
+#         "class": "DatasetH",
+#         "module_path": "qlib.data.dataset",
+#         "kwargs": {
+#             "handler": {
+#                 "class": "Alpha158",
+#                 "module_path": "qlib.contrib.data.handler",
+#                 "kwargs": data_handler_config,
+#             },
+#             "segments": {
+#                 "train": (start_date_str, today_str),
+#                 # "valid": (start_date_str, today_str),
+#                 "test": (today_str, (today + pd.Timedelta(days=9)).strftime("%Y-%m-%d")),
+#             },
+#         },
+#     },
+# }
+
+# # 初始化新的dataset和model
+# retrained_dataset = init_instance_by_config(retrain_task["dataset"])
+# retrained_model = init_instance_by_config(retrain_task["model"])
+
+# 執行二次訓練
+# with R.start(experiment_name="trained_model"):
+#     try:
+#         recorder = R.get_recorder(recorder_id=rid, experiment_name="train_model")
+#         print_green("get recorder successfully")
+#         retrained_model = recorder.load_object("trained_model")
+#         R.log_params(**flatten_dict(retrain_task))
+#         print_green("Training model with expanded dataset...")
+#         retrained_model.fit(retrained_dataset)
+#         R.save_objects(trained_model=retrained_model)
+#         rid = R.get_recorder().id
+#         print_green("Retraining completed successfully!")
+#     except Exception as retrain_error:
+#         warn_with_color(f"Retraining failed: {retrain_error}")
+
 
 # Skip the portfolio analysis loading due to benchmark issues
-# recorder = R.get_recorder(recorder_id=ba_rid, experiment_name="backtest_analysis")
-# print(recorder)
-# pred_df = recorder.load_object("pred.pkl")
-# report_normal_df = recorder.load_object("portfolio_analysis/report_normal_1day.pkl")
-# positions = recorder.load_object("portfolio_analysis/positions_normal_1day.pkl")
-# analysis_df = recorder.load_object("portfolio_analysis/port_analysis_1day.pkl")
+recorder = R.get_recorder(recorder_id=rid, experiment_name="backtest_analysis")
+pred_df = recorder.load_object("pred.pkl")
+report_normal_df = recorder.load_object("portfolio_analysis/report_normal_1day.pkl")
+positions = recorder.load_object("portfolio_analysis/positions_normal_1day.pkl")
+analysis_df = recorder.load_object("portfolio_analysis/port_analysis_1day.pkl")
 
-# analysis_position.report_graph(report_normal_df)
-# analysis_position.risk_analysis_graph(analysis_df, report_normal_df)
+analysis_position.report_graph(report_normal_df)
+analysis_position.risk_analysis_graph(analysis_df, report_normal_df)
+
 
 ###################################
 # Generate future predictions
 ###################################
-print("Generating future predictions...")
+print_green("Generating future predictions...")
 
 # Create future dataset for prediction
 future_start = today
@@ -788,8 +746,15 @@ future_dataset_config = {
 future_dataset = init_instance_by_config(future_dataset_config)
 
 # Load the trained model
-recorder = R.get_recorder(recorder_id=rid, experiment_name="train_model")
+recorder = R.get_recorder(recorder_id=rid, experiment_name="trained_model")
 trained_model = recorder.load_object("trained_model")
+
+
+# 訓練完成後添加特徵重要性分析
+
+# 使用方法
+# importance_df = analyze_feature_importance(trained_model, dataset)
+
 
 # Generate predictions for future dates
 try:
@@ -841,7 +806,7 @@ try:
                     },
                 }
                 
-                temp_dataset = init_instance_by_config(temp_dataset_config)
+                temp_dataset = dataset
                 temp_test_data = temp_dataset.prepare("test")
                 
                 if not temp_test_data.empty:
@@ -860,7 +825,7 @@ try:
             
             # Get the latest date for each instrument
             latest_date = today_str
-            instruments = market[:20]  # Limit to 20 instruments
+            instruments = market  # Limit to 20 instruments
             
             # Create multi-index for latest predictions
             index_tuples = [(inst, latest_date) for inst in instruments]
@@ -914,7 +879,7 @@ try:
     current_data = D.features(
         market,
         ["$close", "$open", "$high", "$low", "$volume"],
-        start_time=(today - pd.Timedelta(days=5)).strftime("%Y-%m-%d"),
+        start_time=(today - pd.Timedelta(days=10)).strftime("%Y-%m-%d"),
         end_time=today_str,
         freq="day"
     )
@@ -997,7 +962,7 @@ try:
             "recommendation": recommendation,
             "confidence": confidence,
             "risk_level": risk_level,
-            "current_price": round(latest_close, 2),
+            # "current_price": round(latest_close, 2),
             "volume": int(latest_volume),
             "price_change_5d_pct": round(price_change_5d, 2),
             "volatility": round(volatility, 2)

@@ -325,21 +325,21 @@ def get_us_stock_symbols(qlib_data_path: [str, Path] = None) -> list:
             logger.warning(f"Failed to fetch from Eastmoney: {e}")
             return []
 
-    @deco_retry
-    def _get_nasdaq():
-        _res_symbols = []
-        for _name in ["otherlisted", "nasdaqtraded"]:
-            url = f"ftp://ftp.nasdaqtrader.com/SymbolDirectory/{_name}.txt"
-            df = pd.read_csv(url, sep="|")
-            df = df.rename(columns={"ACT Symbol": "Symbol"})
-            _symbols = df["Symbol"].dropna()
-            _symbols = _symbols.str.replace("$", "-P", regex=False)
-            _symbols = _symbols.str.replace(".W", "-WT", regex=False)
-            _symbols = _symbols.str.replace(".U", "-UN", regex=False)
-            _symbols = _symbols.str.replace(".R", "-RI", regex=False)
-            _symbols = _symbols.str.replace(".", "-", regex=False)
-            _res_symbols += _symbols.unique().tolist()
-        return _res_symbols
+    # @deco_retry
+    # def _get_nasdaq():
+    #     _res_symbols = []
+    #     for _name in ["otherlisted", "nasdaqtraded"]:
+    #         url = f"ftp://ftp.nasdaqtrader.com/SymbolDirectory/{_name}.txt"
+    #         df = pd.read_csv(url, sep="|")
+    #         df = df.rename(columns={"ACT Symbol": "Symbol"})
+    #         _symbols = df["Symbol"].dropna()
+    #         _symbols = _symbols.str.replace("$", "-P", regex=False)
+    #         _symbols = _symbols.str.replace(".W", "-WT", regex=False)
+    #         _symbols = _symbols.str.replace(".U", "-UN", regex=False)
+    #         _symbols = _symbols.str.replace(".R", "-RI", regex=False)
+    #         _symbols = _symbols.str.replace(".", "-", regex=False)
+    #         _res_symbols += _symbols.unique().tolist()
+    #     return _res_symbols
 
     @deco_retry
     def _get_nyse():
@@ -364,9 +364,9 @@ def get_us_stock_symbols(qlib_data_path: [str, Path] = None) -> list:
         return _symbols
 
     if _US_SYMBOLS is None:
-        _all_symbols = _get_eastmoney() + _get_nasdaq() + _get_nyse()
+        _all_symbols = _get_eastmoney() + _get_nyse()
         if qlib_data_path is not None:
-            for _index in ["nasdaq100", "sp500"]:
+            for _index in ["sp500"]:
                 ins_df = pd.read_csv(
                     Path(qlib_data_path).joinpath(f"instruments/{_index}.txt"),
                     sep="\t",
