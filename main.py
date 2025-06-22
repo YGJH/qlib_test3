@@ -389,10 +389,6 @@ with R.start(experiment_name="backtest_analysis"):
     print_green("get recorder successfully")
     model = recorder.load_object("trained_model")
     print(type(model))
-    sr = SignalRecord(model=model , dataset=dataset,recorder=recorder)
-    sr.generate()
-    par = PortAnaRecord(recorder, port_analysis_config)
-    par.generate()
     # Generate predictions on validation period using D.features directly
     print_green("Generating predictions on validation dataset using D.features...")
     try:
@@ -401,7 +397,7 @@ with R.start(experiment_name="backtest_analysis"):
         print_yellow(type(val_features))
         # print_green(f"Validation features shape: {val_features.shape}")
         # if not val_features.empty:
-        pred_df = model.predict(val_features , "valid")
+        pred_df = model.predict(val_features)
         print_green(f"Predictions generated successfully: {pred_df.shape}")
         # else:
             # warn_with_color("Validation features DataFrame is empty, cannot generate predictions")
@@ -546,7 +542,7 @@ with R.start(experiment_name="backtest_analysis"):
             print_green("Generating predictions for evaluation...")
             
             # Use the trained model to predict on validation data
-            val_pred = model.predict(val_data , 'valid')
+            val_pred = model.predict(val_data)
             print_green(f"Evaluation predictions shape: {val_pred.shape}")
 
             if not val_pred.empty and len(val_pred) > 0:
@@ -639,69 +635,52 @@ with R.start(experiment_name="backtest_analysis"):
             "status": "metrics_unavailable"
         }
 
+    recorder = R.get_recorder()
+    br_rid = recorder.id
+    sr = SignalRecord(model=model , dataset=dataset,recorder=recorder)
+    sr.generate()
+    par = PortAnaRecord(recorder, port_analysis_config , "day")
+    par.generate()
+
+with R.start(experiment_name="portfolio_analysis"):
+    # Load the recorder for portfolio analysis
+    recorder = R.get_recorder(recorder_id=br_rid, experiment_name="backtest_analysis")
+    print_green("Loading recorder for portfolio analysis...")
+    
+    # Load analysis results
+    pred_df = recorder.load_object("pred.pkl")
+    report_normal_df = recorder.load_object("portfolio_analysis/report_normal_1day.pkl")
+    positions = recorder.load_object("portfolio_analysis/positions_normal_1day.pkl")
+    analysis_df = recorder.load_object("portfolio_analysis/port_analysis_1day.pkl")
+
+    # Generate Plotly figures and display/save them
+    fig_report = analysis_position.report_graph(report_normal_df, show_notebook=False)
+    fig_risk   = analysis_position.risk_analysis_graph(analysis_df, report_normal_df, show_notebook=False)
+    # prepare prediction+label for IC plot
+    label_df = dataset.prepare("valid", col_set="label")
+    label_df.columns = ['label']
+    pred_label = pd.concat([label_df, pred_df], axis=1).reindex(label_df.index)
+    fig_ic     = analysis_position.score_ic_graph(pred_label, show_notebook=False)
+    # score IC
+    # model performance (returns list of Figures)
+    model_figs = analysis_model.model_performance_graph(pred_label, show_notebook=False)
+    def dump_figs(figs, base_name):
+        lst = figs if isinstance(figs, (list, tuple)) else [figs]
+        for idx, fig in enumerate(lst):
+            fname = f"{base_name}" + (f"_{idx}" if len(lst) > 1 else "") + ".html"
+            fig.write_html(fname)
+            fig.show(renderer="browser")
+
+    # save and show each figure
+
+    dump_figs(fig_report, "report")
+    dump_figs(fig_risk,   "risk")
+    dump_figs(fig_ic,     "score_ic")
+    dump_figs(model_figs, "model_performance")
+
+    print_green("Portfolio analysis saved successfully!")
 
 
-# 準備train 第二次數據 ， 不太需要
-
-# 使用方法
-# retrain_task = create_retrain_task(task, train_end_date_str, today_str)
-
-# print_green("Starting retraining with validation data...")
-
-# # 創建新的dataset配置（包含原validation數據用於訓練）
-# retrain_task = {
-#     "model": {
-#         "class": "LGBModel",
-#         "module_path": "qlib.contrib.model.gbdt",
-#         "kwargs": task["model"]["kwargs"].copy()  # 使用相同的模型參數
-#     },
-#     "dataset": {
-#         "class": "DatasetH",
-#         "module_path": "qlib.data.dataset",
-#         "kwargs": {
-#             "handler": {
-#                 "class": "Alpha158",
-#                 "module_path": "qlib.contrib.data.handler",
-#                 "kwargs": data_handler_config,
-#             },
-#             "segments": {
-#                 "train": (start_date_str, today_str),
-#                 # "valid": (start_date_str, today_str),
-#                 "test": (today_str, (today + pd.Timedelta(days=9)).strftime("%Y-%m-%d")),
-#             },
-#         },
-#     },
-# }
-
-# # 初始化新的dataset和model
-# retrained_dataset = init_instance_by_config(retrain_task["dataset"])
-# retrained_model = init_instance_by_config(retrain_task["model"])
-
-# 執行二次訓練
-# with R.start(experiment_name="trained_model"):
-#     try:
-#         recorder = R.get_recorder(recorder_id=rid, experiment_name="train_model")
-#         print_green("get recorder successfully")
-#         retrained_model = recorder.load_object("trained_model")
-#         R.log_params(**flatten_dict(retrain_task))
-#         print_green("Training model with expanded dataset...")
-#         retrained_model.fit(retrained_dataset)
-#         R.save_objects(trained_model=retrained_model)
-#         rid = R.get_recorder().id
-#         print_green("Retraining completed successfully!")
-#     except Exception as retrain_error:
-#         warn_with_color(f"Retraining failed: {retrain_error}")
-
-
-# Skip the portfolio analysis loading due to benchmark issues
-recorder = R.get_recorder(recorder_id=rid, experiment_name="backtest_analysis")
-pred_df = recorder.load_object("pred.pkl")
-report_normal_df = recorder.load_object("portfolio_analysis/report_normal_1day.pkl")
-positions = recorder.load_object("portfolio_analysis/positions_normal_1day.pkl")
-analysis_df = recorder.load_object("portfolio_analysis/port_analysis_1day.pkl")
-
-analysis_position.report_graph(report_normal_df)
-analysis_position.risk_analysis_graph(analysis_df, report_normal_df)
 
 
 ###################################

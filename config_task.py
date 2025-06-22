@@ -214,7 +214,24 @@ def get_task(
         total_cols = train_df.shape[1]
         # if you know your sequence length is 1, simply subtract label:
         actual_d_feat = total_cols - 1
-
+        """
+        d_feat: int = 20,
+        d_model: int = 64,
+        batch_size: int = 8192,
+        nhead: int = 2,
+        num_layers: int = 2,
+        dropout: float = 0,
+        n_epochs=100,
+        lr=0.0001,
+        metric="",
+        early_stop=5,
+        loss="mse",
+        optimizer="adam",
+        reg=1e-3,
+        n_jobs=10,
+        GPU=0,
+        seed=None,
+        """
         task = {
             "model": {
                 "class": "TransformerModel",
@@ -237,7 +254,7 @@ def get_task(
                     "optimizer": "Adam",
                     "learning_rate": 1e-4,
                     "batch_size": 64,
-                    "epochs": 128,
+                    "n_epochs": 2,
                     "loss": "mse",
                     # 如果有 GPU 可指定 "cuda"
                     "device": "cuda",
