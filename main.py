@@ -21,7 +21,15 @@ from config_task import get_task, get_date, get_data_handler_config, test_data
 from colors import Colors, print_green, print_yellow, print_red, warn_with_color
 # Try to import sklearn, if not available use basic metrics
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Set to 0 for single GPU usage, or adjust as needed
+
+def check_gpu(): 
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Set to 0 for single GPU usage, or adjust as needed
+    import torch
+    print("torch.cuda.is_available():", torch.cuda.is_available())
+    print("torch.cuda.device_count():", torch.cuda.device_count())
+    if torch.cuda.is_available():
+        print("Current device:", torch.cuda.current_device())
+        print("Device name:", torch.cuda.get_device_name(0))
 
 try:
     from sklearn.metrics import mean_squared_error, r2_score
@@ -106,7 +114,7 @@ def get_data():
 # except Exception as e:
 #     print(f"Warning: Data download failed: {e}")
 #     print("Continuing with existing data...")
-
+check_gpu()
 # NOTE: need to download data from remote: python scripts/get_data.py qlib_data_cn --target_dir ~/.qlib/qlib_data/cn_data
 provider_uri = ".qlib/qlib_data/us_data"  # target_dir
 qlib.init(provider_uri=provider_uri, region=REG_US)
@@ -176,7 +184,7 @@ try:
 
     if len(us_stocks) > 0:
         market = us_stocks
-        market = random.sample(market, min(40, len(market)))
+        market = random.sample(market, min(200, len(market)))
         # market = market[:min(40, len(market))]  # Limit to 400 stocks
 
         # 驗證這些symbols是否真的有數據
@@ -235,6 +243,7 @@ print_green(f"  - Market: {market[:min(10 , len(market))]}")
 print_green(f"  - Benchmark: {benchmark}")
 print_green(f"  - Date range: {start_date_str} to {today_str}")
 print_green(f"  - Training: {start_date_str} to {train_end_date_str}")
+
 
 
 
@@ -338,10 +347,23 @@ print("Starting model training...")
 
 # start exp to train model
 with R.start(experiment_name="train_model"):
-    R.log_params(**flatten_dict(task))
+    import json
+    with open("instruments.json", "w", encoding="utf-8") as fp:
+        json.dump(market, fp, ensure_ascii=False, indent=2)
+
+    # 2. 把這個 JSON 當 artifact 上傳
+    import mlflow
+    mlflow.log_artifact("instruments.json", artifact_path="metadata")
+
+    # 3. 其他原本要記參數的動作
+    # R.log_params(**flatten_dict(task))
+    params = flatten_dict(task)
+    params.pop("dataset.kwargs.handler.kwargs.instruments", None)
+    R.log_params(**params)
     model.fit(dataset)
     R.save_objects(trained_model=model)
     rid = R.get_recorder().id
+
 
 
 ###################################

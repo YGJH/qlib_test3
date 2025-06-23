@@ -2429,6 +2429,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "catboost" },
     { name = "markdown" },
+    { name = "mlflow" },
     { name = "plotly" },
     { name = "pyqlib" },
     { name = "scikit-learn" },
@@ -2442,6 +2443,7 @@ dependencies = [
 requires-dist = [
     { name = "catboost", specifier = ">=1.2.8" },
     { name = "markdown", specifier = ">=3.8.2" },
+    { name = "mlflow", specifier = ">=3.1.0" },
     { name = "plotly", specifier = ">=6.1.2" },
     { name = "pyqlib", specifier = ">=0.9.6" },
     { name = "scikit-learn", specifier = ">=1.7.0" },

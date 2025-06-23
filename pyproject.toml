@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "catboost>=1.2.8",
     "markdown>=3.8.2",
+    "mlflow>=3.1.0",
     "plotly>=6.1.2",
     "pyqlib>=0.9.6",
     "scikit-learn>=1.7.0",

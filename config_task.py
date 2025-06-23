@@ -7,7 +7,7 @@ from qlib.utils import init_instance_by_config
 
 def get_date():
     # Calculate date ranges for training and validation
-    start_date = pd.Timestamp("2021-06-01")  # Match data collector start date
+    start_date = pd.Timestamp("2021-01-01")  # Match data collector start date
     today = pd.Timestamp.now().normalize()  # Normalize to remove time component
 
     # --format='ISO8601'
@@ -254,11 +254,13 @@ def get_task(
                     "optimizer": "Adam",
                     "learning_rate": 1e-4,
                     "batch_size": 64,
-                    "n_epochs": 2,
+                    "n_epochs": 2**9,
                     "loss": "mse",
                     # 如果有 GPU 可指定 "cuda"
                     "device": "cuda",
                     "seed": 42,
+                    # 早停輪數
+                    "early_stop": 2**8,
                 },
             },
             "dataset": transformer_dataset_cfg,
