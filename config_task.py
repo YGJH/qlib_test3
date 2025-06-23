@@ -1,10 +1,9 @@
 import pandas as pd
 import qlib
 from qlib.data import D
-from colors import Colors, print_green, print_yellow, warn_with_color
 from pathlib import Path
 from qlib.utils import init_instance_by_config
-
+from colors import print_green, print_yellow, warn_with_color, Colors
 def get_date():
     # Calculate date ranges for training and validation
     start_date = pd.Timestamp("2021-01-01")  # Match data collector start date
@@ -29,7 +28,7 @@ def get_date():
 
     # Ensure dates are properly formatted
     start_date_str = start_date.strftime("%Y-%m-%d")
-    train_end_date_str = train_end_date.strftime("%Y-%m-%d") 
+    train_end_date_str = train_end_date.strftime("%Y-%m-%d")
     today_str = (today - pd.Timedelta(days=4)).strftime("%Y-%m-%d")
 
     print_green(f"Data range: {start_date_str} to {today_str}")
@@ -58,12 +57,12 @@ def get_task(
 
     """
     Returns a task configuration for Qlib with specified date ranges.
-    
+
     Parameters:
     - start_date_str: Start date for training data.
     - train_end_date_str: End date for training data.
     - today_str: Date for validation and test data.
-    
+
     Returns:
     - A dictionary representing the task configuration.
     """
@@ -206,14 +205,7 @@ def get_task(
                 },
             },
         }
-        # instantiate dataset to infer flat train‐window width
-        ds_inst = init_instance_by_config(transformer_dataset_cfg)
-        train_df = ds_inst.prepare("train")
-        # train_df.columns = [ F₁(t₁),…,F_d(t₁),L(t₁),…,F₁(tₙ),…,F_d(tₙ),L(tₙ) ]
-        # so number of features per step = (total_cols ÷ window_steps) − 1 (minus the label)
-        total_cols = train_df.shape[1]
-        # if you know your sequence length is 1, simply subtract label:
-        actual_d_feat = total_cols - 1
+
         """
         d_feat: int = 20,
         d_model: int = 64,
@@ -232,35 +224,38 @@ def get_task(
         GPU=0,
         seed=None,
         """
+        
         task = {
             "model": {
                 "class": "TransformerModel",
                 "module_path": "qlib.contrib.model.pytorch_transformer_ts",
                 "kwargs": {
                     # 特徵維度，通常是 handler 輸出特徵的數量
-                    "d_feat": actual_d_feat,   # now matches total_cols−1
-                    "d_model": 64,
+                    "d_feat": get_dfeat(transformer_dataset_cfg),   # now matches total_cols−1
+                    "d_model": 1024,
                     # Attention heads 數量
                     "nhead": 8,
                     # Transformer 層數
-                    "num_layers": 6,
+                    "num_layers": 12,
                     # Feed-forward 隱藏層維度
-                    "dim_feedforward": 512,
+                    "dim_feedforward": 4096,
                     # dropout 機率
                     "dropout": 0.1,
+                    "use_amp": True,  # 是否使用自動混合精度
                     # 激活函數（可選 'relu'、'gelu'…）
-                    "activation": "gelu",
+                    "activation": "relu",
                     # 訓練相關超參數
-                    "optimizer": "Adam",
-                    "learning_rate": 1e-4,
-                    "batch_size": 64,
-                    "n_epochs": 2**9,
-                    "loss": "mse",
+                    "optimizer": "AdamW",
+                    "learning_rate": 1e-3,
+                    "batch_size": 128,
+                    "n_epochs": 128,
+                    "loss": "huber",
+                    "metric": "loss",
                     # 如果有 GPU 可指定 "cuda"
                     "device": "cuda",
                     "seed": 42,
                     # 早停輪數
-                    "early_stop": 2**8,
+                    "early_stop": 64,
                 },
             },
             "dataset": transformer_dataset_cfg,
@@ -268,9 +263,16 @@ def get_task(
 
     return task
 
-
-def get_dfeat():
-    return 158  # Default feature dimension for Alpha158 handler
+def get_dfeat(transformer_dataset_cfg):
+  # instantiate dataset to infer flat train‐window width
+  ds_inst = init_instance_by_config(transformer_dataset_cfg)
+  train_df = ds_inst.prepare("train")
+  # train_df.columns = [ F₁(t₁),…,F_d(t₁),L(t₁),…,F₁(tₙ),…,F_d(tₙ),L(tₙ) ]
+  # so number of features per step = (total_cols ÷ window_steps) − 1 (minus the label)
+  total_cols = train_df.shape[1]
+  # if you know your sequence length is 1, simply subtract label:
+  actual_d_feat = total_cols - 1
+  return actual_d_feat
 
 def get_data_handler_config(
         market=None,  # Market list to use, if None will try to load from existing data
@@ -360,7 +362,7 @@ def test_data(market=None,
     if verification_data.empty:
         warn_with_color("Verification failed: No data available")
         raise ValueError("Verification failed: No data available")
-    
+
     # Check data quality
     non_null_rows = verification_data.dropna().shape[0]
     print_green(f"Non-null rows: {non_null_rows} out of {verification_data.shape[0]}")
