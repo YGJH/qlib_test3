@@ -51,6 +51,8 @@ class TransformerModel(Model):
         accum_steps=2,
         **kwargs,
     ):
+        self.alpha=None if alpha is None else alpha
+        self.beta=None if beta is None else beta
         self.accum_steps = accum_steps
         # set hyper-parameters.
         self.fitted = False
