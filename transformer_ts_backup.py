@@ -6,6 +6,8 @@ from __future__ import division
 from __future__ import print_function
 from torch.optim import AdamW
 import numpy as np
+from torch.cuda.amp import GradScaler
+
 import pandas as pd
 import copy
 import math
@@ -44,6 +46,8 @@ class TransformerModel(Model):
         GPU=0,
 		use_amp=False,
         seed=None,
+        alpha=None,
+        beta=None,
         accum_steps=2,
         **kwargs,
     ):
@@ -68,7 +72,6 @@ class TransformerModel(Model):
         self.logger = get_module_logger("TransformerModel")
         self.logger.info("Naive Transformer:" "\nbatch_size : {}" "\ndevice : {}".format(self.batch_size, self.device))
         if self.use_amp:
-            from torch.cuda.amp import GradScaler
             self.scaler = torch.amp.GradScaler('cuda')
             
         if self.seed is not None:
@@ -107,11 +110,27 @@ class TransformerModel(Model):
     def loss_fn(self, pred, label):
         mask = ~torch.isnan(label)
 
-        if self.loss == "mse":
-            return self.mse(pred[mask], label[mask])
+        p = pred[mask]
+        y = label[mask]
+        # 1) pure IC loss: maximize corr, so minimize -corr
+        def ic_loss(x, t):
+            xm = x.mean()
+            tm = t.mean()
+            cov = ((x - xm) * (t - tm)).mean()
+            return - cov / (x.std(unbiased=False) * t.std(unbiased=False) + 1e-6)
+
+        if self.loss == "ic":
+            return ic_loss(p, y)
+        # 2) hybrid MSE + IC: alpha * mse + beta * (-corr)
+        elif self.loss == "mse_ic":
+            alpha, beta = self.alpha, self.beta if self.alpha and self.beta else (1.0, 0.1)  # 可在 config_task.py 里调整
+            mse = self.mse(p, y)
+            return alpha * mse + beta * ic_loss(p, y)
+        elif self.loss == "mse":
+            return self.mse(p, y)
         elif self.loss == "huber":
             huber = nn.SmoothL1Loss(reduction="mean")
-            return huber(pred[mask], label[mask])
+            return huber(p, y)
 
         raise ValueError("unknown loss `%s`" % self.loss)
 

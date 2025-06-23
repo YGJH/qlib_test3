@@ -246,10 +246,12 @@ def get_task(
                     "activation": "relu",
                     # 訓練相關超參數
                     "optimizer": "AdamW",
-                    "learning_rate": 1e-3,
+                    "learning_rate": 1,
                     "batch_size": 128,
                     "n_epochs": 128,
-                    "loss": "huber",
+                    "loss": "mse_ic",
+                    "alpha": 0.5,  # 用於 mse_ic 的正則化項
+                    "beta" : 0.5,  # 用於 mse_ic 的正則化項
                     "metric": "loss",
                     # 如果有 GPU 可指定 "cuda"
                     "device": "cuda",

@@ -241,7 +241,7 @@ def run():
     )
     print_green("Initializing model and dataset...")
     print_green(f"Final configuration:")
-    print_green(f"  - Market: {market[:min(10 , len(market))]}")
+    print_green(f"  - Market: {market[:min(200 , len(market))]}")
     print_green(f"  - Benchmark: {benchmark}")
     print_green(f"  - Date range: {start_date_str} to {today_str}")
     print_green(f"  - Training: {start_date_str} to {train_end_date_str}")
