@@ -270,8 +270,7 @@ class YahooCollectorUS(YahooCollector, ABC):
             "^DJI",
         ]
         import random
-        random.shuffle(symbols)
-        symbols = symbols[:10]
+        # random.shuffle(symbols)
         logger.info(f"get {len(symbols)} symbols.")
         return symbols
 
@@ -545,16 +544,27 @@ class YahooNormalize1dExtend(YahooNormalize1d):
             return df.reset_index()
         old_df = self.old_qlib_data.loc[str(symbol_name).upper()]
         latest_date = old_df.index[-1]
-        df = df.loc[latest_date:]
-        new_latest_data = df.iloc[0]
-        old_latest_data = old_df.loc[latest_date]
+        # align types and check if any new records beyond latest_date
+        latest_ts = pd.Timestamp(latest_date)
+        if latest_ts not in df.index:
+            # no overlap point in new data → nothing to extend
+            return df.reset_index()
+        # slice new data from the overlapping date onward, then drop the duplicate
+        df_new = df.loc[latest_ts:]
+        # drop the first row if it's exactly the old/latest date
+        if not df_new.empty and df_new.index[0] == latest_ts:
+            df_new = df_new.iloc[1:]
+        if df_new.empty:
+            return df.reset_index()
+        # rescale each column relative to old vs new latest
+        new_latest = df_new.iloc[0]
+        old_latest = old_df.loc[latest_date]
         for col in self.column_list[:-1]:
             if col == "volume":
-                df[col] = df[col] / (new_latest_data[col] / old_latest_data[col])
+                df_new[col] = df_new[col] / (new_latest[col] / old_latest[col])
             else:
-                df[col] = df[col] * (old_latest_data[col] / new_latest_data[col])
-        return df.drop(df.index[0]).reset_index()
-
+                df_new[col] = df_new[col] * (old_latest[col] / new_latest[col])
+        return df_new.reset_index()
 
 class YahooNormalize1min(YahooNormalize, ABC):
     """Normalised to 1min using local 1d data"""
@@ -969,29 +979,29 @@ class Run(BaseRun):
             $ python collector.py update_data_to_bin --qlib_data_1d_dir <user data dir> --trading_date <start date> --end_date <end date>
         """
 
-        if self.interval.lower() != "1d":
-            logger.warning(f"currently supports 1d data updates: --interval 1d")
+        # if self.interval.lower() != "1d":
+        #     logger.warning(f"currently supports 1d data updates: --interval 1d")
 
-        # download qlib 1d data
+        # # download qlib 1d data
         qlib_data_1d_dir = str(Path(qlib_data_1d_dir).expanduser().resolve())
         if not exists_qlib_data(qlib_data_1d_dir):
             GetData().qlib_data(
                 target_dir=qlib_data_1d_dir, interval=self.interval, region=self.region, exists_skip=exists_skip
             )
 
-        # start/end date
+        # # start/end date
         calendar_df = pd.read_csv(Path(qlib_data_1d_dir).joinpath("calendars/day.txt"))
         trading_date = (pd.Timestamp(calendar_df.iloc[-1, 0]) - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
 
         if end_date is None:
             end_date = (pd.Timestamp(trading_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
 
-        # download data from yahoo
-        # NOTE: when downloading data from YahooFinance, max_workers is recommended to be 1
-        self.download_data(delay=delay, start=trading_date, end=end_date, check_data_length=check_data_length)
-        # NOTE: a larger max_workers setting here would be faster
+        # # download data from yahoo
+        # # NOTE: when downloading data from YahooFinance, max_workers is recommended to be 1
+        # self.download_data(delay=delay, start=trading_date, end=end_date, check_data_length=check_data_length)
+        # # NOTE: a larger max_workers setting here would be faster
         self.max_workers = (
-            max(multiprocessing.cpu_count() - 2, 1)
+            max(multiprocessing.cpu_count(), 1)
             if self.max_workers is None or self.max_workers <= 1
             else self.max_workers
         )

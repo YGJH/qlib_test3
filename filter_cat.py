@@ -10,6 +10,66 @@ import shutil
 from multiprocessing import Pool, cpu_count
 from functools import partial
 
+def get_data_config(
+        start_date_str: str = "2021-01-01",
+        train_end_date_str: str = "2023-01-01",
+        today_str: str = "2023-01-01",
+        today: pd.Timestamp = pd.Timestamp.now(),
+        market: list = None,
+    ):
+    try:
+        data_handler_config = {
+            "start_time": start_date_str,
+            "end_time": train_end_date_str,
+            "fit_start_time": start_date_str,
+            "fit_end_time": train_end_date_str,
+            "instruments": market,  # 確保`market`包含有效的股票代碼
+        }
+
+        transformer_dataset_cfg = {
+            "class": "DatasetH",
+            "module_path": "qlib.data.dataset",
+            "kwargs": {
+                "handler": {
+                    "class": "Alpha158",
+                    "module_path": "qlib.contrib.data.handler",
+                    "kwargs": data_handler_config,
+                },
+                "segments": {
+                    "train": (start_date_str, train_end_date_str),
+                    "valid": (train_end_date_str, today_str),
+                    "test": (
+                        today_str,
+                        (today + pd.Timedelta(days=9)).strftime("%Y-%m-%d"),
+                    ),
+                },
+            },
+        }
+        return transformer_dataset_cfg
+    except Exception as e:
+        raise ValueError(f"Failed to get data config: {e}")
+
+def analyze_label_quality(dataset):
+    """分析標籤質量"""
+    try:
+        labels = dataset.prepare("train", col_set="label")
+        print_green(f"標籤統計信息:")
+        print(f"  - 標籤形狀: {labels.shape}")
+        print(f"  - 標籤均值: {labels.mean().iloc[0]:.6f}")
+        print(f"  - 標籤標準差: {labels.std().iloc[0]:.6f}")
+        print(f"  - 標籤範圍: [{labels.min().iloc[0]:.6f}, {labels.max().iloc[0]:.6f}]")
+        print(f"  - 缺失值數量: {labels.isnull().sum().iloc[0]}")
+        
+        # 檢查標籤分佈
+        label_values = labels.iloc[:, 0].values
+        print(f"  - 正值比例: {(label_values > 0).mean():.4f}")
+        print(f"  - 零值比例: {(label_values == 0).mean():.4f}")
+        print(f"  - 負值比例: {(label_values < 0).mean():.4f}")
+        return labels
+    except Exception as e:
+        print(f"標籤分析失敗: {e}")
+
+
 def check_instrument_data(market_folder, start_date_str, today_str, features_dir):
     """
     檢查單個股票的資料是否存在且無NaN值
@@ -36,7 +96,7 @@ def check_instrument_data(market_folder, start_date_str, today_str, features_dir
         )
         
         if stock_data.empty:
-            # warn_with_color(f"No data available for market: {market}")
+            warn_with_color(f"No data available for market: {market}")
             shutil.rmtree(os.path.join(features_dir, market_folder), ignore_errors=True)
             return None
         

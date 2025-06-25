@@ -3,7 +3,6 @@ import warnings
 from pathlib import Path
 import qlib  # Uncomment this line
 import pandas as pd
-import numpy as np
 import json
 import random
 from qlib.constant import REG_US
@@ -17,6 +16,7 @@ import subprocess
 from qlib.contrib.model.double_ensemble import DEnsembleModel
 from qlib.contrib.model.gbdt import LGBModel
 from qlib.contrib.data.handler import Alpha158
+from transformer import TransformerModel
 from config_task import get_task, get_date, get_data_handler_config, test_data
 from colors import Colors, print_green, print_yellow, print_red, warn_with_color
 # Try to import sklearn, if not available use basic metrics
@@ -115,7 +115,9 @@ def get_data():
 #     print(f"Warning: Data download failed: {e}")
 #     print("Continuing with existing data...")
 
-def run():
+def run(model="LGBModel",market_num=None):
+    import numpy as np
+
     check_gpu()
     # NOTE: need to download data from remote: python scripts/get_data.py qlib_data_cn --target_dir ~/.qlib/qlib_data/cn_data
     provider_uri = ".qlib/qlib_data/us_data"  # target_dir
@@ -148,8 +150,6 @@ def run():
             return None
 
 
-
-    model = "Transformer"  # Default model
 
     # Check which instruments are available in the data
     print_green("Checking available instruments...")
@@ -186,7 +186,7 @@ def run():
 
         if len(us_stocks) > 0:
             market = us_stocks
-            market = random.sample(market, min(20, len(market)))
+            market = random.sample(market, min((market_num if market_num is not None else 300), len(market)))
             # market = market[:min(40, len(market))]  # Limit to 400 stocks
 
             # 驗證這些symbols是否真的有數據
@@ -241,7 +241,7 @@ def run():
     )
     print_green("Initializing model and dataset...")
     print_green(f"Final configuration:")
-    print_green(f"  - Market: {market[:min(200 , len(market))]}")
+    print_green(f"  - Market: {market[:min(10 , len(market))]}")
     print_green(f"  - Benchmark: {benchmark}")
     print_green(f"  - Date range: {start_date_str} to {today_str}")
     print_green(f"  - Training: {start_date_str} to {train_end_date_str}")
@@ -1018,7 +1018,7 @@ def run():
             "daily_predictions": future_pred_dict,
             "risk_disclaimer": "本預測基於歷史數據和機器學習模型，僅供參考，投資有風險，請謹慎決策。",
             "model_info": {
-                "算法": "LightGBM",
+                "算法": f"{model}",
                 "特徵工程": "Alpha158",
                 "訓練數據量": "約4年歷史數據",
                 "驗證期間": f"{train_end_date_str} 至 {today_str}",
@@ -1118,7 +1118,10 @@ def run():
 
 
 def main():
-    run()
+    run(
+        model="TransformerModel",
+        market_num=100
+    )
 
 
 if __name__ == "__main__":

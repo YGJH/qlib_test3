@@ -135,7 +135,7 @@ def get_task(
                         "valid": (train_end_date_str, today_str),
                         "test": (
                             today_str,
-                            (today + pd.Timedelta(days=9)).strftime("%Y-%m-%d"),
+                            (today + pd.Timedelta(days=90)).strftime("%Y-%m-%d"),
                         ),
                     },
                 },
@@ -179,12 +179,12 @@ def get_task(
                     "segments": {
                         "train": (start_date_str, train_end_date_str),
                         "valid": (train_end_date_str, today_str),
-                        "test": (today_str, (today + pd.Timedelta(days=9)).strftime("%Y-%m-%d")),
+                        "test": (today_str, (today + pd.Timedelta(days=90)).strftime("%Y-%m-%d")),
                     },
                 },
             },
         }
-    elif model == 'Transformer':
+    elif model == 'TransformerModel_ts':
 
         transformer_dataset_cfg = {
             "class": "DatasetH",
@@ -200,7 +200,7 @@ def get_task(
                     "valid": (train_end_date_str, today_str),
                     "test": (
                         today_str,
-                        (today + pd.Timedelta(days=9)).strftime("%Y-%m-%d"),
+                        (today + pd.Timedelta(days=90)).strftime("%Y-%m-%d"),
                     ),
                 },
             },
@@ -247,6 +247,83 @@ def get_task(
                     # 訓練相關超參數
                     "optimizer": "AdamW",
                     "learning_rate": 1,
+                    "batch_size": 128,
+                    "n_epochs": 128,
+                    "loss": "mse_ic",
+                    "alpha": 0.5,  # 用於 mse_ic 的正則化項
+                    "beta" : 0.5,  # 用於 mse_ic 的正則化項
+                    "metric": "loss",
+                    # 如果有 GPU 可指定 "cuda"
+                    "device": "cuda",
+                    "seed": 42,
+                    # 早停輪數
+                    "early_stop": 64,
+                },
+            },
+            "dataset": transformer_dataset_cfg,
+        }
+    elif model == "TransformerModel":
+        """
+        d_feat: int = 20,
+        d_model: int = 64,
+        batch_size: int = 2048,
+        nhead: int = 2,
+        num_layers: int = 2,
+        dropout: float = 0,
+        n_epochs=100,
+        lr=0.0001,
+        metric="",
+        early_stop=5,
+        loss="mse",
+        optimizer="adam",
+        reg=1e-3,
+        n_jobs=10,
+        GPU=0,
+        seed=None,
+        **kwargs,
+"""
+        transformer_dataset_cfg = {
+            "class": "DatasetH",
+            "module_path": "qlib.data.dataset",
+            "kwargs": {
+                "handler": {
+                    "class": "Alpha158",
+                    "module_path": "qlib.contrib.data.handler",
+                    "kwargs": data_handler_config,
+                },
+                "segments": {
+                    "train": (start_date_str, train_end_date_str),
+                    "valid": (train_end_date_str, today_str),
+                    "test": (
+                        today_str,
+                        (today + pd.Timedelta(days=90)).strftime("%Y-%m-%d"),
+                    ),
+                },
+            },
+        }
+
+        task = {
+            "model": {
+                "class": "TransformerModel",
+                "module_path": "transformer",
+                "kwargs": {
+                    # 特徵維度，通常是 handler 輸出特徵的數量
+                    "d_feat": get_dfeat(transformer_dataset_cfg),   # now matches total_cols−1
+                    "d_model": 1024,
+                    # Attention heads 數量
+                    "nhead": 8,
+                    # Transformer 層數
+                    "num_layers": 12,
+                    # Feed-forward 隱藏層維度
+                    "dim_feedforward": 4096,
+                    # dropout 機率
+                    "dropout": 0.1,
+                    "use_amp": True,  # 是否使用自動混合精度
+                    # 激活函數（可選 'relu'、'gelu'…）
+                    "activation": "relu",
+                    # 訓練相關超參數
+                    "optimizer": "AdamW",
+                    "learning_rate": 1e-2,
                     "batch_size": 128,
                     "n_epochs": 128,
                     "loss": "mse_ic",
