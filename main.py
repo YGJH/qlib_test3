@@ -19,8 +19,8 @@ from qlib.contrib.data.handler import Alpha158
 from transformer import TransformerModel
 from config_task import get_task, get_date, get_data_handler_config, test_data
 from colors import Colors, print_green, print_yellow, print_red, warn_with_color
+from symbo import symbols, get_extra_symbols
 # Try to import sklearn, if not available use basic metrics
-
 
 def check_gpu(): 
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Set to 0 for single GPU usage, or adjust as needed
@@ -115,7 +115,7 @@ def get_data():
 #     print(f"Warning: Data download failed: {e}")
 #     print("Continuing with existing data...")
 
-def run(model="LGBModel",market_num=None):
+def run(model="LGBModel",market_num=None, days=6):
     import numpy as np
 
     check_gpu()
@@ -186,9 +186,15 @@ def run(model="LGBModel",market_num=None):
 
         if len(us_stocks) > 0:
             market = us_stocks
-            market = random.sample(market, min((market_num if market_num is not None else 300), len(market)))
-            # market = market[:min(40, len(market))]  # Limit to 400 stocks
-
+            if market_num is not None:
+                print_green(f"Limiting market to {market_num} instruments")
+                avaliable_sym = set(us_stocks)&set(symbols['US'])
+                market = list(avaliable_sym)[:min(len(market), market_num)]  # Limit to specified number
+            else:
+                print_green("No market limit specified, using all available US stocks")
+                avaliable_sym = set(us_stocks)&set(symbols['US'])
+                market = list(avaliable_sym)
+            print_yellow(f"Selected {len(market)} instruments from US stocks: {market[:min(10, len(market))]}...")
             # 驗證這些symbols是否真的有數據
             print_green("Verifying data availability for selected instruments...")
             valid_instruments = []
@@ -220,11 +226,12 @@ def run(model="LGBModel",market_num=None):
 
 
 
-    start_date_str, train_end_date_str, today_str, today = get_date()
+    start_date_str, train_end_date_str, today_str, today = get_date(days)
 
     data_handler_config = get_data_handler_config(market=market,
                                                 start_date_str=start_date_str,
-                                                train_end_date_str=train_end_date_str)
+                                                train_end_date_str=train_end_date_str,
+                                                today_str=today_str)
     test_data(
         market=market,
         start_date_str=start_date_str,
@@ -241,11 +248,11 @@ def run(model="LGBModel",market_num=None):
     )
     print_green("Initializing model and dataset...")
     print_green(f"Final configuration:")
-    print_green(f"  - Market: {market[:min(10 , len(market))]}")
+    print_green(f"  - Market: {market[:min(10 , len(market))]}...")
     print_green(f"  - Benchmark: {benchmark}")
     print_green(f"  - Date range: {start_date_str} to {today_str}")
     print_green(f"  - Training: {start_date_str} to {train_end_date_str}")
-
+    print_green(f"  - Validation: {train_end_date_str} to {today_str}")
 
 
 
@@ -260,20 +267,20 @@ def run(model="LGBModel",market_num=None):
         # 列出特徵檔案
         if os.path.exists(instrument_dir):
             fields = [f.split(".")[0] for f in os.listdir(instrument_dir) if f.endswith(".bin")]
-            print(f"支持的因子字段: {fields}")
+            print_green(f"支持的因子字段: {fields}")
         else:
-            print(f"未找到股票 {instrument} 的特徵資料")
+            print_green(f"未找到股票 {instrument} 的特徵資料")
         stock_data = D.features(
             instruments=market,
             fields=['$close', '$factor', '$high', '$low', '$open', '$volume'],
-            start_time=(pd.Timestamp.now()-pd.Timedelta(days=5)).strftime("%Y-%m-%d"),
+            start_time=(pd.Timestamp.now()-pd.Timedelta(days=days+1)).strftime("%Y-%m-%d"),
             end_time=today_str,
             freq="day"
         )
-        print("前幾支股票的開盤價:")
-        print(stock_data)
+        print_green("前幾支股票的開盤價:")
+        print_green(stock_data)
     except Exception as e:
-        print(f"提取開盤價時發生錯誤: {e}")
+        print_green(f"提取開盤價時發生錯誤: {e}")
 
     try:
         print_green("Creating model...")
@@ -313,7 +320,7 @@ def run(model="LGBModel",market_num=None):
             market = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]
         
         future_start = today
-        future_end = today + pd.Timedelta(days=9)
+        future_end = today + pd.Timedelta(days=days)
         future_dates = pd.bdate_range(start=future_start, end=future_end, freq='B')
         
         mock_predictions = {}
@@ -356,9 +363,9 @@ def run(model="LGBModel",market_num=None):
         # 2. 把這個 JSON 當 artifact 上傳
         import mlflow
         mlflow.log_artifact("instruments.json", artifact_path="metadata")
-
+        print_yellow(type(dataset))
         # 3. 其他原本要記參數的動作
-        # R.log_params(**flatten_dict(task))
+        R.log_params(**flatten_dict(task))
         params = flatten_dict(task)
         params.pop("dataset.kwargs.handler.kwargs.instruments", None)
         R.log_params(**params)
@@ -397,6 +404,7 @@ def run(model="LGBModel",market_num=None):
             "benchmark": benchmark,  # Explicitly set benchmark to None
             "exchange_kwargs": {
                 "freq": "day",
+                "codes": market,          # ← add this line so Exchange.codes==your list
                 "limit_threshold": None,  # US market has no limit threshold
                 "deal_price": "close",
                 "open_cost": 0.0005,
@@ -404,6 +412,7 @@ def run(model="LGBModel",market_num=None):
                 "min_cost": 5,
             },
         },
+
     }
 
     # backtest and analysis
@@ -465,8 +474,8 @@ def run(model="LGBModel",market_num=None):
                 
                 try:
                     # Use qlib data directly to create predictions
-                    recent_start = (today - pd.Timedelta(days=5)).strftime("%Y-%m-%d")
-                    
+                    recent_start = (today - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
+
                     # Get recent data for the stocks we have
                     recent_data = D.features(
                         market,
@@ -714,7 +723,7 @@ def run(model="LGBModel",market_num=None):
 
     # Create future dataset for prediction
     future_start = today
-    future_end = today + pd.Timedelta(days=9)
+    future_end = today + pd.Timedelta(days=days)
 
     # Generate future dates (only business days)
     future_dates = pd.bdate_range(start=future_start, end=future_end, freq='B')
@@ -757,7 +766,6 @@ def run(model="LGBModel",market_num=None):
 
     # 使用方法
     # importance_df = analyze_feature_importance(trained_model, dataset)
-
 
     # Generate predictions for future dates
     try:
@@ -882,7 +890,7 @@ def run(model="LGBModel",market_num=None):
         current_data = D.features(
             market,
             ["$close", "$open", "$high", "$low", "$volume"],
-            start_time=(today - pd.Timedelta(days=10)).strftime("%Y-%m-%d"),
+            start_time=(today - pd.Timedelta(days=days)).strftime("%Y-%m-%d"),
             end_time=today_str,
             freq="day"
         )
@@ -1002,7 +1010,7 @@ def run(model="LGBModel",market_num=None):
             "prediction_period": f"{future_start.strftime('%Y-%m-%d')} to {future_end.strftime('%Y-%m-%d')}",
             "training_period": f"{start_date_str} to {train_end_date_str}",
             "validation_period": f"{train_end_date_str} to {today_str}",
-            "model_type": "LGBModel",
+            "model_type": f"{model}",
             "total_instruments": len(market),
             "model_performance": model_metrics,  # Add model evaluation metrics
             "analysis_summary": {
@@ -1024,7 +1032,8 @@ def run(model="LGBModel",market_num=None):
                 "驗證期間": f"{train_end_date_str} 至 {today_str}",
                 "預測數據樣本": len(pred_values) if 'pred_values' in locals() else 0,
                 "平均預測分數": round(avg_prediction, 6) if 'avg_prediction' in locals() else 0
-            }
+            },
+
         }
         
         # Save to future.json
@@ -1066,7 +1075,7 @@ def run(model="LGBModel",market_num=None):
             fallback_data = D.features(
                 market[:10],  # Limit to 10 stocks for fallback
                 ["$close"],
-                start_time=(today - pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
+                start_time=(today - pd.Timedelta(days=days)).strftime("%Y-%m-%d"),
                 end_time=today_str,
                 freq="day"
             )
@@ -1120,7 +1129,8 @@ def run(model="LGBModel",market_num=None):
 def main():
     run(
         model="TransformerModel",
-        market_num=100
+        market_num=500,
+        days=7,
     )
 
 

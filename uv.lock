@@ -2268,37 +2268,7 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/05/e7/df2285f3d08fee213f2d041540fa4fc9ca6c2d44cf36d3a035bf2a8d2bcc/pyparsing-3.2.3-py3-none-any.whl", hash = "sha256:a749938e02d6fd0b59b356ca504a24982314bb090c383e3cf201c95ef7e2bfcf", size = 111120, upload-time = "2025-03-25T05:01:24.908Z" },
 ]
 
-[[package]]
-name = "pyqlib"
-version = "0.9.6"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "cvxpy" },
-    { name = "dill" },
-    { name = "filelock" },
-    { name = "fire" },
-    { name = "gym" },
-    { name = "joblib" },
-    { name = "jupyter" },
-    { name = "lightgbm" },
-    { name = "loguru" },
-    { name = "matplotlib" },
-    { name = "mlflow" },
-    { name = "nbconvert" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "pymongo" },
-    { name = "python-redis-lock" },
-    { name = "pyyaml" },
-    { name = "redis" },
-    { name = "ruamel-yaml" },
-    { name = "tqdm" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/46/34/8171832762ae35d939be501b242b815ae0122aa9a31cade8f361dc03951c/pyqlib-0.9.6-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:4a5724de35458e3d4a77ee8b5c855a25c943780be2f9d87cf98ca44e04a2e2ee", size = 951961, upload-time = "2024-12-23T07:38:47.315Z" },
-    { url = "https://files.pythonhosted.org/packages/e5/dc/9e7f040c57ea6b826514e7e58154668c085c58895a2913c4edefd5567c64/pyqlib-0.9.6-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:66aa39a02eec5148202c2b0bbb8bace0bc3b00b6a7678110aea7c284a754606c", size = 1400292, upload-time = "2024-12-23T07:39:07.549Z" },
-    { url = "https://files.pythonhosted.org/packages/ac/e4/a94b896d7dd56a459715128cae27e368cae090519c28f41475cd88249ecf/pyqlib-0.9.6-cp312-cp312-win_amd64.whl", hash = "sha256:985becfedead64cef171885dcda5ef26e84b9fe9c9358e3b025c61d4094d841e", size = 861735, upload-time = "2024-12-23T07:48:33.938Z" },
-]
+
 
 [[package]]
 name = "python-dateutil"
@@ -2428,10 +2398,10 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "catboost" },
+    { name = "joblib" },
     { name = "markdown" },
     { name = "mlflow" },
     { name = "plotly" },
-    { name = "pyqlib" },
     { name = "scikit-learn" },
     { name = "statsmodels" },
     { name = "torch" },
@@ -2442,10 +2412,10 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "catboost", specifier = ">=1.2.8" },
+    { name = "joblib", specifier = ">=1.5.1" },
     { name = "markdown", specifier = ">=3.8.2" },
     { name = "mlflow", specifier = ">=3.1.0" },
     { name = "plotly", specifier = ">=6.1.2" },
-    { name = "pyqlib", specifier = ">=0.9.6" },
     { name = "scikit-learn", specifier = ">=1.7.0" },
     { name = "statsmodels", specifier = ">=0.14.4" },
     { name = "torch", specifier = ">=2.7.1" },

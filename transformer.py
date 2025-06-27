@@ -30,6 +30,10 @@ from qlib.data.dataset.handler import DataHandlerLP
 
 # qrun examples/benchmarks/Transformer/workflow_config_transformer_Alpha360.yaml ”
 
+try:
+    from colors import *
+except ImportError:
+    pass
 
 class TransformerModel(Model):
     def __init__(
@@ -172,7 +176,7 @@ class TransformerModel(Model):
             label = torch.from_numpy(y_train_values[indices[i : i + self.batch_size]]).float().to(self.device)
             self.train_optimizer.zero_grad()
             if self.use_amp:
-                with autocast():
+                with torch.amp.autocast('cuda'):
                     pred = self.model(feature)
                     loss = self.loss_fn(pred, label)
                 self.scaler.scale(loss).backward()
@@ -226,11 +230,17 @@ class TransformerModel(Model):
         evals_result=dict(),
         save_path=None,
     ):
-        df_train, df_valid, df_test = dataset.prepare(
-            ["train", "valid", "test"],
+        df_train, df_valid = dataset.prepare(
+            ["train", "valid"],
             col_set=["feature", "label"],
             data_key=DataHandlerLP.DK_L,
         )
+        try:
+            print_green("df_train:", df_train.shape)
+            print_green("df_valid:", df_valid.shape)
+        except Exception as e:
+            print("df_train:", df_train.shape)
+            print("df_valid:", df_valid.shape)
         if df_train.empty or df_valid.empty:
             raise ValueError("Empty data from dataset, please check your dataset config.")
 
@@ -301,7 +311,7 @@ class TransformerModel(Model):
 
             with torch.no_grad():
                 if self.use_amp:
-                    with autocast():
+                    with torch.amp.autocast('cuda'):
                         out = self.model(x_batch)
                 else:
                     out = self.model(x_batch)

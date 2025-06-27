@@ -4,7 +4,7 @@ from qlib.data import D
 from pathlib import Path
 from qlib.utils import init_instance_by_config
 from colors import print_green, print_yellow, warn_with_color, Colors
-def get_date():
+def get_date(day):
     # Calculate date ranges for training and validation
     start_date = pd.Timestamp("2021-01-01")  # Match data collector start date
     today = pd.Timestamp.now().normalize()  # Normalize to remove time component
@@ -24,12 +24,13 @@ def get_date():
 
     # Ensure we don't go into the future
     if train_end_date >= today:
-        train_end_date = today - pd.Timedelta(days=10)
+        train_end_date = today - pd.Timedelta(days=day)
 
     # Ensure dates are properly formatted
     start_date_str = start_date.strftime("%Y-%m-%d")
     train_end_date_str = train_end_date.strftime("%Y-%m-%d")
-    today_str = (today - pd.Timedelta(days=4)).strftime("%Y-%m-%d")
+    print_yellow(f"day: {day}")
+    today_str = (today - pd.Timedelta(days=day)).strftime("%Y-%m-%d")
 
     print_green(f"Data range: {start_date_str} to {today_str}")
     print_green(f"Training: {start_date_str} to {train_end_date_str}")
@@ -248,7 +249,7 @@ def get_task(
                     "optimizer": "AdamW",
                     "learning_rate": 1,
                     "batch_size": 128,
-                    "n_epochs": 128,
+                    "n_epochs": 3,
                     "loss": "mse_ic",
                     "alpha": 0.5,  # 用於 mse_ic 的正則化項
                     "beta" : 0.5,  # 用於 mse_ic 的正則化項
@@ -313,7 +314,7 @@ def get_task(
                     # Attention heads 數量
                     "nhead": 8,
                     # Transformer 層數
-                    "num_layers": 12,
+                    "num_layers": 14,
                     # Feed-forward 隱藏層維度
                     "dim_feedforward": 4096,
                     # dropout 機率
@@ -323,10 +324,10 @@ def get_task(
                     "activation": "relu",
                     # 訓練相關超參數
                     "optimizer": "AdamW",
-                    "learning_rate": 1e-2,
+                    "learning_rate": 1e-7,
                     "batch_size": 128,
                     "n_epochs": 128,
-                    "loss": "mse_ic",
+                    "loss": "mse_ic2",
                     "alpha": 0.5,  # 用於 mse_ic 的正則化項
                     "beta" : 0.5,  # 用於 mse_ic 的正則化項
                     "metric": "loss",
@@ -334,7 +335,7 @@ def get_task(
                     "device": "cuda",
                     "seed": 42,
                     # 早停輪數
-                    "early_stop": 64,
+                    "early_stop": 32,
                 },
             },
             "dataset": transformer_dataset_cfg,
@@ -357,6 +358,7 @@ def get_data_handler_config(
         market=None,  # Market list to use, if None will try to load from existing data
         start_date_str="2021-01-01",
         train_end_date_str="2024-12-31",
+        today_str="2025-06-16",  # Default to a future date for testing purposes
 ):
     try:
        # Keep the original broader date range - don't narrow it down for fallback
@@ -364,7 +366,7 @@ def get_data_handler_config(
         # If verification succeeds, use the current configuration
         data_handler_config = {
             "start_time": start_date_str,
-            "end_time": train_end_date_str,
+            "end_time": today_str,
             "fit_start_time": start_date_str,
             "fit_end_time": train_end_date_str,
             # "instruments": market,  # 確保`market`包含有效的股票代碼
