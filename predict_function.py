@@ -50,10 +50,11 @@ def comprehensive_predict(model, dataset, chunk, steps: int = 7):
     predictions = {}
     
     try:
-        # 1. 獲取最新的歷史數據作為基準
-        print("Preparing validation data for predictions...")
-        latest_data = dataset.prepare("valid", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
-        
+        # 1. 獲取最新的歷史數據作為基準（优先 valid，若不存在则用 test）
+        print("Preparing input data for predictions...")
+        seg_name = "valid" if "valid" in getattr(dataset, "segments", {}) else "test"
+        print(f"→ using segment `{seg_name}`")
+        latest_data = dataset.prepare(seg_name, col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)        
         if latest_data is None or len(latest_data) == 0:
             print("No training data available for predictions")
             return predictions

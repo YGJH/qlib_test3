@@ -9,7 +9,6 @@ source_dir = Path("scripts/data_collector/yahoo/source")
 normalize_dir = Path("scripts/data_collector/yahoo/normalize")
 QLIB_DIR = Path(".qlib/qlib_data/us_data")  
 def clean_dir():
-    return
     print_green("Cleaning up old source and normalize directories...")
     if source_dir.exists():
         shutil.rmtree(source_dir)
@@ -19,12 +18,12 @@ def clean_dir():
         shutil.rmtree(normalize_dir)
         print_green(f"Removed {normalize_dir}")
         
-    if QLIB_DIR.exists():
-        shutil.rmtree(QLIB_DIR, ignore_errors=True)
-        print_yellow(f"Force removed {QLIB_DIR}")
+    # if QLIB_DIR.exists():
+    #     shutil.rmtree(QLIB_DIR, ignore_errors=True)
+    #     print_yellow(f"Force removed {QLIB_DIR}")
 
     # Create directories
-    QLIB_DIR.mkdir(parents=True, exist_ok=True)
+    # QLIB_DIR.mkdir(parents=True, exist_ok=True)
     source_dir.mkdir(parents=True, exist_ok=True)
     normalize_dir.mkdir(parents=True, exist_ok=True)
 
@@ -65,8 +64,8 @@ while True:
         print_green("Data collection completed successfully.")
         subprocess.run(filter_cat, check=True)
         print_green("Category filtering completed successfully.")
-        # subprocess.run(running_main, check=True)
-        # print_green("Main script executed successfully.")
+        subprocess.run(running_main, check=True)
+        print_green("Main script executed successfully.")
         print_green("nice good dog.")
         break
     except subprocess.CalledProcessError as e:

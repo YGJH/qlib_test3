@@ -15,16 +15,19 @@ from qlib.data import D
 import subprocess
 from qlib.contrib.model.double_ensemble import DEnsembleModel
 from qlib.contrib.model.gbdt import LGBModel
-from qlib.contrib.data.handler import Alpha158
 from transformer import TransformerModel
 from config_task import get_task, get_date, get_data_handler_config, test_data
 from colors import Colors, print_green, print_yellow, print_red, warn_with_color
 from symbo import symbols, get_extra_symbols
-# Try to import sklearn, if not available use basic metrics
+from qlib.contrib.data.handler import Alpha158, Alpha360
 
-def check_gpu(): 
+# Try to import sklearn, if not available use basic metrics
+def check_gpu():
+    os.environ['export CUDA_LAUNCH_BLOCKING'] = '1'  # Ensure CUDA errors are reported immediately
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Set to 0 for single GPU usage, or adjust as needed
     import torch
+    torch.cuda.empty_cache()
+
     print("torch.cuda.is_available():", torch.cuda.is_available())
     print("torch.cuda.device_count():", torch.cuda.device_count())
     if torch.cuda.is_available():
@@ -1038,6 +1041,7 @@ def run(model="LGBModel",market_num=None, days=6):
         
         # Save to future.json
         with open("future.json", "w", encoding="utf-8") as f:
+            # -------------------------------------------------------------------
             json.dump(prediction_output, f, ensure_ascii=False, indent=2)
         
         print_green("完整預測報告已保存到 future.json")
@@ -1129,7 +1133,7 @@ def run(model="LGBModel",market_num=None, days=6):
 def main():
     run(
         model="TransformerModel",
-        market_num=800,
+        market_num=300,
         days=7,
     )
 

@@ -127,7 +127,7 @@ def get_task(
                 "module_path": "qlib.data.dataset",
                 "kwargs": {
                     "handler": {
-                        "class": "Alpha158",
+                        "class": "Alpha360",
                         "module_path": "qlib.contrib.data.handler",
                         "kwargs": data_handler_config,
                     },
@@ -173,7 +173,7 @@ def get_task(
                 "module_path": "qlib.data.dataset",
                 "kwargs": {
                     "handler": {
-                        "class": "Alpha158",
+                        "class": "Alpha360",
                         "module_path": "qlib.contrib.data.handler",
                         "kwargs": data_handler_config,
                     },
@@ -237,7 +237,7 @@ def get_task(
                     # Attention heads 數量
                     "nhead": 8,
                     # Transformer 層數
-                    "num_layers": 12,
+                    "num_layers": 16,
                     # Feed-forward 隱藏層維度
                     "dim_feedforward": 4096,
                     # dropout 機率
@@ -314,9 +314,9 @@ def get_task(
                     # Attention heads 數量
                     "nhead": 8,
                     # Transformer 層數
-                    "num_layers": 15,
+                    "num_layers": 32,
                     # Feed-forward 隱藏層維度
-                    "dim_feedforward": 4096,
+                    "dim_feedforward": 1024,
                     # dropout 機率
                     "dropout": 0.1,
                     "use_amp": False,  # 是否使用自動混合精度
@@ -324,7 +324,7 @@ def get_task(
                     "activation": "relu",
                     # 訓練相關超參數
                     "optimizer": "AdamW",
-                    "learning_rate": 1e-9,
+                    "learning_rate": 1e-7,
                     "batch_size": 128,
                     "n_epochs": 128,
                     "loss": "mse_ic2",
