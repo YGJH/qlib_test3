@@ -68,7 +68,7 @@ def time_series_cv_validation(dataset, model_config, n_splits=3):
 def analyze_label_quality(dataset):
     """分析標籤質量"""
     try:
-        labels = dataset.prepare("train", col_set="label")
+        labels = dataset.prepare("train")
         print_green(f"標籤統計信息:")
         print(f"  - 標籤形狀: {labels.shape}")
         print(f"  - 標籤均值: {labels.mean().iloc[0]:.6f}")
@@ -347,8 +347,8 @@ def run(model="LGBModel",market_num=None, days=6):
         with open("future.json", "w", encoding="utf-8") as f:
             json.dump(error_output, f, ensure_ascii=False, indent=2)
         
-        print("Mock predictions saved to future.json")
-        print(f"Generated mock predictions for {len(market[:10])} instruments over {len(future_dates)} business days")
+        print_red("Mock predictions saved to future.json")
+        print_red(f"Generated mock predictions for {len(market[:10])} instruments over {len(future_dates)} business days")
         exit(0)  # Exit successfully with mock data
 
     # If we reach here, model and dataset were created successfully
@@ -1129,7 +1129,7 @@ def run(model="LGBModel",market_num=None, days=6):
 def main():
     run(
         model="TransformerModel",
-        market_num=500,
+        market_num=800,
         days=7,
     )
 

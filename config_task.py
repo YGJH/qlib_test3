@@ -314,17 +314,17 @@ def get_task(
                     # Attention heads 數量
                     "nhead": 8,
                     # Transformer 層數
-                    "num_layers": 14,
+                    "num_layers": 15,
                     # Feed-forward 隱藏層維度
                     "dim_feedforward": 4096,
                     # dropout 機率
                     "dropout": 0.1,
-                    "use_amp": True,  # 是否使用自動混合精度
+                    "use_amp": False,  # 是否使用自動混合精度
                     # 激活函數（可選 'relu'、'gelu'…）
                     "activation": "relu",
                     # 訓練相關超參數
                     "optimizer": "AdamW",
-                    "learning_rate": 1e-7,
+                    "learning_rate": 1e-9,
                     "batch_size": 128,
                     "n_epochs": 128,
                     "loss": "mse_ic2",
@@ -335,7 +335,7 @@ def get_task(
                     "device": "cuda",
                     "seed": 42,
                     # 早停輪數
-                    "early_stop": 32,
+                    "early_stop": 16,
                 },
             },
             "dataset": transformer_dataset_cfg,

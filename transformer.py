@@ -172,8 +172,8 @@ class TransformerModel(Model):
             if len(indices) - i < self.batch_size:
                 break
 
-            feature = torch.from_numpy(x_train_values[indices[i : i + self.batch_size]]).float().to(self.device)
-            label = torch.from_numpy(y_train_values[indices[i : i + self.batch_size]]).float().to(self.device)
+            feature = torch.from_numpy(x_train_values[indices[i : i + self.batch_size]]).contiguous().float().to(self.device)
+            label = torch.from_numpy(y_train_values[indices[i : i + self.batch_size]]).contiguous().float().to(self.device)
             self.train_optimizer.zero_grad()
             if self.use_amp:
                 with torch.amp.autocast('cuda'):
