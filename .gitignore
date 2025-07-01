@@ -15,3 +15,6 @@ mnt/**
 instruments/**
 **.html
 full_version/**
+**.pkl
+**.pkl
+best_transformer.pkl

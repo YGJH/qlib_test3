@@ -58,7 +58,8 @@ def comprehensive_predict(model, dataset, chunk, steps: int = 7):
         if latest_data is None or len(latest_data) == 0:
             print("No training data available for predictions")
             return predictions
-            
+        d_feat = getattr(model.model, 'd_feat', 20)
+
         # 檢查數據結構
         print(f"Data shape: {latest_data.shape}")
         print(f"Data index: {latest_data.index.names}")
@@ -102,6 +103,9 @@ def comprehensive_predict(model, dataset, chunk, steps: int = 7):
                     # 取最近20天數據，如果不足20天就取全部
                     stock_data = stock_data.tail(min(20, len(stock_data)))
                     print(f"Got {len(stock_data)} data points for {stock}")
+
+                    # 提取最新的 label 用于 basic_info
+                    latest_returns = stock_data['label'].values if 'label' in stock_data.columns else None
                     
                 except Exception as e:
                     print(f"Error getting data for stock {stock}: {e}")
@@ -115,7 +119,6 @@ def comprehensive_predict(model, dataset, chunk, steps: int = 7):
                 # 獲取最新特徵和標籤
                 try:
                     latest_features = stock_data['feature'].iloc[-1]
-                    latest_returns = stock_data['label'].values if 'label' in stock_data.columns else None
                     
                     # 確保 latest_features 是 numpy array
                     if hasattr(latest_features, 'values'):
@@ -123,15 +126,16 @@ def comprehensive_predict(model, dataset, chunk, steps: int = 7):
                     elif isinstance(latest_features, list):
                         latest_features = np.array(latest_features)
                     
-                    # 檢查特徵維度
-                    if len(latest_features.shape) == 0 or latest_features.shape[0] == 0:
-                        print(f"Invalid feature shape for {stock}: {latest_features.shape}")
-                        continue
-                        
+                    # 檢查並調整特徵維度
+                    if len(latest_features) % d_feat != 0:
+                        target_len = ((len(latest_features) // d_feat) + 1) * d_feat
+                        latest_features = np.resize(latest_features, target_len)
+                        print(f"Adjusted feature length to {len(latest_features)} for {stock}")
+                    
                     print(f"Feature shape for {stock}: {latest_features.shape}")
                     
                 except Exception as e:
-                    print(f"Error extracting features for {stock}: {e}")
+                    print(f"Error preparing features for {stock}: {e}")
                     continue
                 
                 # 初始化預測結果
@@ -239,36 +243,58 @@ def comprehensive_predict(model, dataset, chunk, steps: int = 7):
 
 
 def predict_multi_step_returns(model, initial_features, steps):
-    """簡化版多步預測收益率"""
+    """修復版多步預測收益率"""
     try:
         returns = []
         current_features = initial_features.copy()
         
         for step in range(steps):
-            # 確保特徵是正確的形狀
+            # 確保特徵維度符合 TransformerModel 的期望
             if len(current_features.shape) == 1:
+                # 假設 d_feat 從模型獲取，或者使用固定值
+                d_feat = getattr(model.model, 'd_feat', 20)  # 默認20
+                
+                # 檢查特徵長度是否能被 d_feat 整除
+                if len(current_features) % d_feat != 0:
+                    # 如果不能整除，截取或填充到合適長度
+                    target_len = (len(current_features) // d_feat) * d_feat
+                    if target_len == 0:
+                        target_len = d_feat
+                    current_features = np.resize(current_features, target_len)
+                
+                # 重塑為 [1, F*T] 格式，符合 Transformer 期望
                 feature_tensor = torch.from_numpy(current_features.reshape(1, -1)).float().to(model.device)
             else:
                 feature_tensor = torch.from_numpy(current_features).float().to(model.device)
             
+            # 確保模型在評估模式
+            model.model.eval()
+            
             with torch.no_grad():
                 pred = model.model(feature_tensor)
-                if pred.dim() == 2 and pred.size(1) >= 2:
-                    predicted_return = float(pred[0, 0].cpu())
-                elif pred.dim() == 2 and pred.size(1) == 1:
+                
+                # 處理 TransformerModel 的輸出（應該是標量或1維張量）
+                if pred.dim() == 0:  # 標量
+                    predicted_return = float(pred.cpu())
+                elif pred.dim() == 1:  # 1維張量
+                    predicted_return = float(pred[0].cpu())
+                elif pred.dim() == 2 and pred.size(1) == 1:  # [1, 1]
                     predicted_return = float(pred[0, 0].cpu())
                 else:
-                    predicted_return = float(pred[0].cpu() if pred.dim() == 1 else pred.cpu())
+                    # fallback：取第一個元素
+                    predicted_return = float(pred.view(-1)[0].cpu())
             
             returns.append(predicted_return)
             
-            # 簡化的特徵更新（不更新，保持原始特徵）
-            # 這樣避免了特徵更新可能導致的錯誤
+            # 為了簡化，不更新特徵（避免特徵更新錯誤）
+            # 在實際應用中，可能需要根據預測結果更新特徵
         
         return np.array(returns)
         
     except Exception as e:
         print(f"Error in predict_multi_step_returns: {e}")
+        import traceback
+        traceback.print_exc()
         return np.array([0.0] * steps)  # 返回零收益作為默認值
 
 

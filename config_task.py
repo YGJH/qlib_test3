@@ -6,7 +6,7 @@ from qlib.utils import init_instance_by_config
 from colors import print_green, print_yellow, warn_with_color, Colors
 def get_date(day):
     # Calculate date ranges for training and validation
-    start_date = pd.Timestamp("2021-01-01")  # Match data collector start date
+    start_date = pd.Timestamp("2019-01-01")  # Match data collector start date
     today = pd.Timestamp.now().normalize()  # Normalize to remove time component
 
     # --format='ISO8601'
@@ -17,8 +17,8 @@ def get_date(day):
         print_yellow(f"Warning: Only {total_days} days of data available, adjusting date range...")
         start_date = today - pd.Timedelta(days=min_days)
 
-    # Use 80% for training, 20% for validation
-    train_ratio = 0.8
+    # Use 60% for training, 20% for validation, and 20% for testing
+    train_ratio = 0.6
     train_days = int(total_days * train_ratio)
     train_end_date = start_date + pd.Timedelta(days=train_days)
 
@@ -31,16 +31,20 @@ def get_date(day):
     train_end_date_str = train_end_date.strftime("%Y-%m-%d")
     print_yellow(f"day: {day}")
     today_str = (today - pd.Timedelta(days=day)).strftime("%Y-%m-%d")
-
+    valid_ratio = 0.2
+    valid_days = int(total_days * valid_ratio)
+    valid_end_date = train_end_date + pd.Timedelta(days=valid_days)
+    valid_end_date_str = valid_end_date.strftime("%Y-%m-%d")
     print_green(f"Data range: {start_date_str} to {today_str}")
     print_green(f"Training: {start_date_str} to {train_end_date_str}")
-    print_green(f"Validation: {train_end_date_str} to {today_str}")
+    print_green(f"Validation: {train_end_date_str} to {valid_end_date_str}")
+    print_green(f"Testing: {valid_end_date_str} to {today_str}")
 
     ###################################
     # train model
     ###################################
 
-    return start_date_str, train_end_date_str, today_str, today
+    return start_date_str, train_end_date_str, valid_end_date_str, today_str, today
 
 
 
@@ -50,7 +54,8 @@ def get_task(
     data_handler_config=None,  # Data handler configuration, if None will use default
     start_date_str="2021-01-01",
     train_end_date_str="2024-12-31",
-    today_str="2025-06-16",  # Default to a future date for testing purposes
+    valid_end_date_str="2025-06-16",
+    today_str="2025-06-18",  # Default to a future date for testing purposes
     today=None,  # If None, will use current date
 ):
     if market is None:
@@ -198,14 +203,15 @@ def get_task(
                 },
                 "segments": {
                     "train": (start_date_str, train_end_date_str),
-                    "valid": (train_end_date_str, today_str),
+                    "valid": (train_end_date_str, valid_end_date_str),
                     "test": (
+                        valid_end_date_str,
                         today_str,
-                        (today + pd.Timedelta(days=90)).strftime("%Y-%m-%d"),
                     ),
                 },
             },
         }
+
 
         """
         d_feat: int = 20,
@@ -294,10 +300,10 @@ def get_task(
                 },
                 "segments": {
                     "train": (start_date_str, train_end_date_str),
-                    "valid": (train_end_date_str, today_str),
+                    "valid": (train_end_date_str, valid_end_date_str),
                     "test": (
+                        valid_end_date_str,
                         today_str,
-                        (today + pd.Timedelta(days=90)).strftime("%Y-%m-%d"),
                     ),
                 },
             },
@@ -306,19 +312,19 @@ def get_task(
         task = {
             "model": {
                 "class": "TransformerModel",
-                "module_path": "transformer",
+                "module_path": "new_transformer",
                 "kwargs": {
                     # 特徵維度，通常是 handler 輸出特徵的數量
                     "d_feat": get_dfeat(transformer_dataset_cfg),   # now matches total_cols−1
-                    "d_model": 1024,
+                    "d_model": 256,
                     # Attention heads 數量
-                    "nhead": 8,
+                    "nhead": 64,
                     # Transformer 層數
-                    "num_layers": 32,
+                    "num_layers": 256,
                     # Feed-forward 隱藏層維度
-                    "dim_feedforward": 1024,
+                    "dim_feedforward": 256,
                     # dropout 機率
-                    "dropout": 0.1,
+                    "dropout": 0.001,
                     "use_amp": False,  # 是否使用自動混合精度
                     # 激活函數（可選 'relu'、'gelu'…）
                     "activation": "relu",
@@ -333,7 +339,7 @@ def get_task(
                     "metric": "loss",
                     # 如果有 GPU 可指定 "cuda"
                     "device": "cuda",
-                    "seed": 42,
+                    "seed": 19523,
                     # 早停輪數
                     "early_stop": 16,
                 },
@@ -358,7 +364,8 @@ def get_data_handler_config(
         market=None,  # Market list to use, if None will try to load from existing data
         start_date_str="2021-01-01",
         train_end_date_str="2024-12-31",
-        today_str="2025-06-16",  # Default to a future date for testing purposes
+        valid_end_date_str="2025-06-16",
+        today_str="2025-06-18",  # Default to a future date for testing purposes
 ):
     try:
        # Keep the original broader date range - don't narrow it down for fallback
@@ -367,8 +374,8 @@ def get_data_handler_config(
         data_handler_config = {
             "start_time": start_date_str,
             "end_time": today_str,
-            "fit_start_time": start_date_str,
-            "fit_end_time": train_end_date_str,
+            "fit_start_time": train_end_date_str,
+            "fit_end_time": valid_end_date_str,
             # "instruments": market,  # 確保`market`包含有效的股票代碼
             "instruments": market,  # 確保`market`包含有效的股票代碼
             "infer_processors": [

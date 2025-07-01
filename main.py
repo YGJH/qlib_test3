@@ -34,128 +34,16 @@ def check_gpu():
         print("Current device:", torch.cuda.current_device())
         print("Device name:", torch.cuda.get_device_name(0))
 
-try:
-    from sklearn.metrics import mean_squared_error, r2_score
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
-    print("sklearn not available, using basic metrics only")
-
-print("SKLEARN_AVAILABLE:", SKLEARN_AVAILABLE)
-
-def time_series_cv_validation(dataset, model_config, n_splits=3):
-    """時間序列交叉驗證"""
-    
-    # 獲取時間範圍
-    train_start = pd.to_datetime(start_date_str)
-    train_end = pd.to_datetime(train_end_date_str)
-    
-    # 分割時間段
-    total_days = (train_end - train_start).days
-    split_size = total_days // n_splits
-    
-    cv_results = []
-    
-    for i in range(n_splits):
-        fold_start = train_start + pd.Timedelta(days=i * split_size)
-        fold_end = train_start + pd.Timedelta(days=(i + 1) * split_size)
-        
-        print(f"Fold {i+1}: {fold_start.strftime('%Y-%m-%d')} to {fold_end.strftime('%Y-%m-%d')}")
-        
-        # 訓練和驗證該fold
-        # 這裡需要根據具體情況調整
-        
-    return cv_results
-    return retrain_task
-
-def analyze_label_quality(dataset):
-    """分析標籤質量"""
     try:
-        labels = dataset.prepare("train")
-        print_green(f"標籤統計信息:")
-        print(f"  - 標籤形狀: {labels.shape}")
-        print(f"  - 標籤均值: {labels.mean().iloc[0]:.6f}")
-        print(f"  - 標籤標準差: {labels.std().iloc[0]:.6f}")
-        print(f"  - 標籤範圍: [{labels.min().iloc[0]:.6f}, {labels.max().iloc[0]:.6f}]")
-        print(f"  - 缺失值數量: {labels.isnull().sum().iloc[0]}")
-        
-        # 檢查標籤分佈
-        label_values = labels.iloc[:, 0].values
-        print(f"  - 正值比例: {(label_values > 0).mean():.4f}")
-        print(f"  - 零值比例: {(label_values == 0).mean():.4f}")
-        print(f"  - 負值比例: {(label_values < 0).mean():.4f}")
-        
-    except Exception as e:
-        print(f"標籤分析失敗: {e}")
+        from sklearn.metrics import mean_squared_error, r2_score
+        SKLEARN_AVAILABLE = True
+    except ImportError:
+        SKLEARN_AVAILABLE = False
+        print("sklearn not available, using basic metrics only")
 
+    print("SKLEARN_AVAILABLE:", SKLEARN_AVAILABLE)
 
-
-def get_data():
-    cmd = [
-        "uv",
-        "run",
-        "scripts/data_collector/yahoo/collector.py",
-        "--region",
-        "US",
-        "update_data_to_bin",
-        "--qlib_data_1d_dir",
-        ".qlib/qlib_data/us_data",
-        "--end_date",
-        (pd.Timestamp.now() - pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
-        "--delay",
-        "1",
-        "--exists_skip",
-        "False",
-    ]
-    subprocess.run(cmd, check=True)
-
-# Download/update data before using it, No no no no don't do this, it will take a long time
-# print("Checking and updating data...")
-# try:
-#     # get_data()
-#     print("Data download/update completed successfully")
-# except Exception as e:
-#     print(f"Warning: Data download failed: {e}")
-#     print("Continuing with existing data...")
-
-def run(model="LGBModel",market_num=None, days=6):
-    import numpy as np
-
-    check_gpu()
-    # NOTE: need to download data from remote: python scripts/get_data.py qlib_data_cn --target_dir ~/.qlib/qlib_data/cn_data
-    provider_uri = ".qlib/qlib_data/us_data"  # target_dir
-    qlib.init(provider_uri=provider_uri, region=REG_US)
-
-    def analyze_feature_importance(model, dataset):
-        """分析特徵重要性"""
-        try:
-            # 獲取特徵重要性
-            importance = model.model.feature_importance(importance_type='gain')
-            feature_names = dataset.prepare("train").columns
-            
-            # 創建重要性DataFrame
-            importance_df = pd.DataFrame({
-                'feature': feature_names,
-                'importance': importance
-            }).sort_values('importance', ascending=False)
-            
-            print_green("前20個最重要特徵:")
-            print(importance_df.head(20))
-            
-            # 檢查是否有特徵被忽略
-            zero_importance = (importance_df['importance'] == 0).sum()
-            print_yellow(f"零重要性特徵數量: {zero_importance}")
-            
-            return importance_df
-            
-        except Exception as e:
-            print(f"特徵重要性分析失敗: {e}")
-            return None
-
-
-
-    # Check which instruments are available in the data
-    print_green("Checking available instruments...")
+def get_market(market_num):
     try:
         # Read instruments directly from the file
         instruments_file = Path(".qlib/qlib_data/us_data/instruments/all.txt")
@@ -225,15 +113,133 @@ def run(model="LGBModel",market_num=None, days=6):
         print_yellow("Using hardcoded fallback configuration...")
         market = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]  # Hardcoded fallback
         benchmark = random.choice(market)  # Randomly select a benchmark from the fallback list
+    return market, benchmark
+
+
+def check_predict_data(pred_label):
+    # Add this before line 704 to diagnose the data:
+
+    print_green("=== Prediction Data Diagnosis ===")
+    print_green(f"pred_label shape: {pred_label.shape}")
+    print_green(f"pred_label columns: {pred_label.columns.tolist()}")
+    print_green(f"Non-null predictions: {pred_label['score'].notna().sum()}")
+    print_green(f"Non-null labels: {pred_label['label'].notna().sum()}")
+    print_green(f"Valid pairs (both score and label): {pred_label.dropna().shape[0]}")
+
+    # Check for data distribution
+    if not pred_label.empty:
+        score_stats = pred_label['score'].describe()
+        label_stats = pred_label['label'].describe()
+        print_green(f"Score range: [{score_stats['min']:.6f}, {score_stats['max']:.6f}]")
+        print_green(f"Label range: [{label_stats['min']:.6f}, {label_stats['max']:.6f}]")
+
+    # Check unique dates and instruments
+    unique_dates = pred_label.index.get_level_values('datetime').nunique()
+    unique_instruments = pred_label.index.get_level_values('instrument').nunique()
+    print_green(f"Unique dates: {unique_dates}")
+    print_green(f"Unique instruments: {unique_instruments}")
+    print_green("=== End Diagnosis ===")
 
 
 
+def analyze_label_quality(dataset):
+    """分析標籤質量"""
+    try:
+        labels = dataset.prepare("train")
+        print_green(f"標籤統計信息:")
+        print(f"  - 標籤形狀: {labels.shape}")
+        print(f"  - 標籤均值: {labels.mean().iloc[0]:.6f}")
+        print(f"  - 標籤標準差: {labels.std().iloc[0]:.6f}")
+        print(f"  - 標籤範圍: [{labels.min().iloc[0]:.6f}, {labels.max().iloc[0]:.6f}]")
+        print(f"  - 缺失值數量: {labels.isnull().sum().iloc[0]}")
+        
+        # 檢查標籤分佈
+        label_values = labels.iloc[:, 0].values
+        print(f"  - 正值比例: {(label_values > 0).mean():.4f}")
+        print(f"  - 零值比例: {(label_values == 0).mean():.4f}")
+        print(f"  - 負值比例: {(label_values < 0).mean():.4f}")
+        
+    except Exception as e:
+        print(f"標籤分析失敗: {e}")
 
-    start_date_str, train_end_date_str, today_str, today = get_date(days)
+
+
+def get_data():
+    cmd = [
+        "uv",
+        "run",
+        "scripts/data_collector/yahoo/collector.py",
+        "--region",
+        "US",
+        "update_data_to_bin",
+        "--qlib_data_1d_dir",
+        ".qlib/qlib_data/us_data",
+        "--end_date",
+        (pd.Timestamp.now() - pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
+        "--delay",
+        "1",
+        "--exists_skip",
+        "False",
+    ]
+    subprocess.run(cmd, check=True)
+
+# Download/update data before using it, No no no no don't do this, it will take a long time
+# print("Checking and updating data...")
+# try:
+#     # get_data()
+#     print("Data download/update completed successfully")
+# except Exception as e:
+#     print(f"Warning: Data download failed: {e}")
+#     print("Continuing with existing data...")
+
+def run(model="LGBModel",market_num=None, days=6):
+    import numpy as np
+    save_path = "best_transformer.pkl"
+
+    check_gpu()
+    # NOTE: need to download data from remote: python scripts/get_data.py qlib_data_cn --target_dir ~/.qlib/qlib_data/cn_data
+    provider_uri = ".qlib/qlib_data/us_data"  # target_dir
+    qlib.init(provider_uri=provider_uri, region=REG_US)
+
+    def analyze_feature_importance(model, dataset):
+        """分析特徵重要性"""
+        try:
+            # 獲取特徵重要性
+            importance = model.model.feature_importance(importance_type='gain')
+            feature_names = dataset.prepare("train").columns
+            
+            # 創建重要性DataFrame
+            importance_df = pd.DataFrame({
+                'feature': feature_names,
+                'importance': importance
+            }).sort_values('importance', ascending=False)
+            
+            print_green("前20個最重要特徵:")
+            print(importance_df.head(20))
+            
+            # 檢查是否有特徵被忽略
+            zero_importance = (importance_df['importance'] == 0).sum()
+            print_yellow(f"零重要性特徵數量: {zero_importance}")
+            
+            return importance_df
+            
+        except Exception as e:
+            print(f"特徵重要性分析失敗: {e}")
+            return None
+
+
+
+    # Check which instruments are available in the data
+    print_green("Checking available instruments...")
+
+    market , benchmark = get_market(market_num)
+
+    start_date_str, train_end_date_str, valid_end_date_str, today_str, today = get_date(days)
 
     data_handler_config = get_data_handler_config(market=market,
                                                 start_date_str=start_date_str,
                                                 train_end_date_str=train_end_date_str,
+                                                valid_end_date_str=valid_end_date_str,
                                                 today_str=today_str)
     test_data(
         market=market,
@@ -243,6 +249,7 @@ def run(model="LGBModel",market_num=None, days=6):
     task = get_task(
         start_date_str=start_date_str,
         train_end_date_str=train_end_date_str,
+        valid_end_date_str=valid_end_date_str,
         today_str=today_str,
         data_handler_config=data_handler_config,
         today=today,
@@ -255,8 +262,8 @@ def run(model="LGBModel",market_num=None, days=6):
     print_green(f"  - Benchmark: {benchmark}")
     print_green(f"  - Date range: {start_date_str} to {today_str}")
     print_green(f"  - Training: {start_date_str} to {train_end_date_str}")
-    print_green(f"  - Validation: {train_end_date_str} to {today_str}")
-
+    print_green(f"  - Validation: {train_end_date_str} to {valid_end_date_str}")
+    print_green(f"  - Test: {valid_end_date_str} to {today_str}")
 
 
     try:
@@ -366,7 +373,6 @@ def run(model="LGBModel",market_num=None, days=6):
         # 2. 把這個 JSON 當 artifact 上傳
         import mlflow
         mlflow.log_artifact("instruments.json", artifact_path="metadata")
-        print_yellow(type(dataset))
         # 3. 其他原本要記參數的動作
         R.log_params(**flatten_dict(task))
         params = flatten_dict(task)
@@ -375,6 +381,12 @@ def run(model="LGBModel",market_num=None, days=6):
         model.fit(dataset)
         R.save_objects(trained_model=model)
         rid = R.get_recorder().id
+        import pickle
+        with open(save_path, "wb") as f:
+            pickle.dump(model, f)
+
+        print(f"模型已保存到 {save_path}")
+
 
 
 
@@ -457,7 +469,7 @@ def run(model="LGBModel",market_num=None, days=6):
                 print_green("Attempting direct prediction on validation data...")
                 
                 # Get validation data directly from dataset (not from DataFrame)
-                val_data = dataset.prepare("valid")
+                val_data = dataset.prepare("test")
                 print_green(f"Validation data shape: {val_data.shape}")
                 
                 if not val_data.empty:
@@ -566,9 +578,9 @@ def run(model="LGBModel",market_num=None, days=6):
             # Get validation data and labels using dataset object properly
             try:
                 val_data = dataset
-                val_label = dataset.prepare("valid", col_set="label")
+                val_label = dataset.prepare("test", col_set="label")
                 # print_green(f"Validation data shape: {val_data.shape}")
-                print_green(f"Validation label shape: {val_label.shape}")
+                print_green(f"Test label shape: {val_label.shape}")
             except Exception as dataset_error:
                 warn_with_color(f"Dataset prepare error: {dataset_error}")
                 # Try alternative approach if prepare fails
@@ -693,19 +705,22 @@ def run(model="LGBModel",market_num=None, days=6):
         fig_report = analysis_position.report_graph(report_normal_df, show_notebook=False)
         fig_risk   = analysis_position.risk_analysis_graph(analysis_df, report_normal_df, show_notebook=False)
         # prepare prediction+label for IC plot
-        label_df = dataset.prepare("valid", col_set="label")
+        label_df = dataset.prepare("test", col_set="label")
         label_df.columns = ['label']
         pred_label = pd.concat([label_df, pred_df], axis=1).reindex(label_df.index)
         fig_ic     = analysis_position.score_ic_graph(pred_label, show_notebook=False)
         # score IC
         # model performance (returns list of Figures)
         model_figs = analysis_model.model_performance_graph(pred_label, show_notebook=False)
+        
+        check_predict_data(pred_label)
+
         def dump_figs(figs, base_name):
             lst = figs if isinstance(figs, (list, tuple)) else [figs]
             for idx, fig in enumerate(lst):
                 fname = f"{base_name}" + (f"_{idx}" if len(lst) > 1 else "") + ".html"
                 fig.write_html(fname)
-                fig.show(renderer="browser")
+                # fig.show(renderer="browser")
 
         # save and show each figure
 
@@ -716,425 +731,349 @@ def run(model="LGBModel",market_num=None, days=6):
 
         print_green("Portfolio analysis saved successfully!")
 
-
-
-
     ###################################
     # Generate future predictions
     ###################################
     print_green("Generating future predictions...")
 
-    # Create future dataset for prediction
+    # 導入預測函數
+    from predict_function import comprehensive_predict, generate_stock_recommendations
+
+    # 創建未來預測的數據結構
     future_start = today
     future_end = today + pd.Timedelta(days=days)
-
-    # Generate future dates (only business days)
     future_dates = pd.bdate_range(start=future_start, end=future_end, freq='B')
 
-    # Create a dataset config for future predictions
-    future_data_config = {
-        "start_time": start_date_str,
-        "end_time": today_str,  # Use existing data for features
-        "fit_start_time": start_date_str,
-        "fit_end_time": train_end_date_str,
-        "instruments": market,
-        "drop_raw": False,
-    }
+    print_green(f"預測期間: {future_start.strftime('%Y-%m-%d')} 到 {future_end.strftime('%Y-%m-%d')}")
+    print_green(f"預測天數: {len(future_dates)} 個交易日")
 
-    # Create future dataset
-    future_dataset_config = {
-        "class": "DatasetH",
-        "module_path": "qlib.data.dataset",
-        "kwargs": {
-            "handler": {
-                "class": "Alpha158",
-                "module_path": "qlib.contrib.data.handler",
-                "kwargs": future_data_config,
-            },
-            "segments": {
-                "test": (today_str, future_end.strftime("%Y-%m-%d")),
-            },
+    # 初始化預測結果字典
+    prediction_output = {
+        "metadata": {
+            "prediction_date": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "prediction_start": future_start.strftime("%Y-%m-%d"),
+            "prediction_end": future_end.strftime("%Y-%m-%d"),
+            "prediction_horizon_days": days,
+            "business_days": len(future_dates),
+            "model_type": model.__class__.__name__,
+            "total_instruments": len(market),
+            "data_source": "qlib",
+            "region": "US"
         },
+        "model_performance": model_metrics,
+        "instruments": market,
+        "predictions": {}
     }
 
-    # Initialize future dataset
-    future_dataset = init_instance_by_config(future_dataset_config)
-
-    # Load the trained model
-    recorder = R.get_recorder(recorder_id=rid, experiment_name="trained_model")
-    trained_model = recorder.load_object("trained_model")
-
-
-    # 訓練完成後添加特徵重要性分析
-
-    # 使用方法
-    # importance_df = analyze_feature_importance(trained_model, dataset)
-
-    # Generate predictions for future dates
     try:
-        print_green("Generating predictions using trained model...")
+        print_green("開始進行全面預測分析...")
         
-        # First try to use the actual predictions from the model
-        if not pred_df.empty:
-            actual_predictions = pred_df
-            print_green(f"Using loaded predictions, shape: {actual_predictions.shape}")
-        else:
-            print_yellow("No loaded predictions available, generating new ones...")
-            
-            # Try to generate predictions on recent data
-            try:
-                # Use the most recent data for prediction
-                recent_start = (today - pd.Timedelta(days=30)).strftime("%Y-%m-%d")
-                recent_data = D.features(
-                    market,
-                    ["$close", "$open", "$high", "$low", "$volume", "$change", "$factor"],
-                    start_time=recent_start,
-                    end_time=today_str,
-                    freq="day"
-                )
-                
-                if not recent_data.empty:
-                    print_green(f"Recent data shape for prediction: {recent_data.shape}")
-                    
-                    # Create a temporary dataset for prediction
-                    temp_data_config = data_handler_config.copy()
-                    temp_data_config.update({
-                        "start_time": recent_start,
-                        "end_time": today_str,
-                        "fit_start_time": recent_start,
-                        "fit_end_time": today_str
-                    })
-                    
-                    temp_dataset_config = {
-                        "class": "DatasetH", 
-                        "module_path": "qlib.data.dataset",
-                        "kwargs": {
-                            "handler": {
-                                "class": "Alpha158",
-                                "module_path": "qlib.contrib.data.handler",
-                                "kwargs": temp_data_config,
-                            },
-                            "segments": {
-                                "test": (recent_start, today_str),
-                            },
-                        },
-                    }
-                    
-                    temp_dataset = dataset
-                    temp_test_data = temp_dataset.prepare("test")
-                    
-                    if not temp_test_data.empty:
-                        actual_predictions = model.predict(temp_test_data)
-                        print_green(f"Generated new predictions, shape: {actual_predictions.shape}")
-                    else:
-                        raise ValueError("Temporary test data is empty")
-                else:
-                    raise ValueError("Recent data is empty")
-                    
-            except Exception as new_pred_error:
-                warn_with_color(f"Failed to generate new predictions: {new_pred_error}")
-                
-                # Create structured predictions based on market instruments
-                print_yellow("Creating structured predictions for market instruments...")
-                
-                # Get the latest date for each instrument
-                latest_date = today_str
-                instruments = market  # Limit to 20 instruments
-                
-                # Create multi-index for latest predictions
-                index_tuples = [(inst, latest_date) for inst in instruments]
-                multi_index = pd.MultiIndex.from_tuples(index_tuples, names=['instrument', 'datetime'])
-                
-                # Generate realistic predictions (small values around 0) 
-                np.random.seed(42)  # For reproducible results
-                predictions = np.random.normal(0, 0.01, len(instruments))
-                actual_predictions = pd.DataFrame(predictions, index=multi_index, columns=['score'])
-                
-                print_green(f"Created structured predictions with shape: {actual_predictions.shape}")
-        
-        print_green(f"Final predictions shape: {actual_predictions.shape}")
-        print_green(f"Predictions sample:\n{actual_predictions.head()}")
-        
-        # Extract prediction values
-        if not actual_predictions.empty:
-            # If we have multi-index (instrument, datetime), group by instrument
-            if isinstance(actual_predictions.index, pd.MultiIndex):
-                # Get latest prediction for each instrument
-                latest_predictions = actual_predictions.groupby(level=0).tail(1)
-                pred_dict = {}
-                print(type(latest_predictions))
-                for idx, row in latest_predictions.items():
-                    instrument = idx[0] if isinstance(idx, tuple) else idx
-                    pred_dict[instrument] = float(row.iloc[0] if hasattr(row, 'iloc') else row)
-            else:
-                # Simple index, assume it's instrument names
-                pred_dict = {str(idx): float(val) for idx, val in actual_predictions.iloc[:, 0].items()}
-            
-            print_green(f"Extracted {len(pred_dict)} predictions from model")
-            print_green(f"Sample predictions: {dict(list(pred_dict.items())[:5])}")
-            
-            # If we have actual predictions, use them
-            if len(pred_dict) > 0:
-                pred_values = list(pred_dict.values())
-                available_instruments = list(pred_dict.keys())
-            else:
-                # Fallback to market instruments with neutral predictions
-                pred_values = [0.0] * len(market)
-                available_instruments = market
-                pred_dict = {stock: 0.0 for stock in market}
-        else:
-            print_yellow("No actual predictions available, using neutral values")
-            pred_values = [0.0] * len(market)
-            available_instruments = market
-            pred_dict = {stock: 0.0 for stock in market}
-        
-        # Get current stock prices for additional context
-        print_green("Gathering current stock information...")
-        current_data = D.features(
-            market,
-            ["$close", "$open", "$high", "$low", "$volume"],
-            start_time=(today - pd.Timedelta(days=days)).strftime("%Y-%m-%d"),
-            end_time=today_str,
-            freq="day"
+        # 使用 comprehensive_predict 函數進行詳細預測
+        comprehensive_predictions = comprehensive_predict(
+            model=model,
+            dataset=dataset,
+            chunk=market,
+            steps=days
         )
         
-        # Create comprehensive predictions for each stock
-        stock_analysis = {}
-        future_pred_dict = {}
-        
-        # Generate future dates
-        future_dates = pd.bdate_range(start=future_start, end=future_end, freq='B')
-        
-        print_green(f"Processing predictions for {len(market)} stocks over {len(future_dates)} business days...")
-        
-        # Calculate average prediction score
-        if len(pred_values) > 0:
-            avg_prediction = float(sum(pred_values) / len(pred_values))
-        else:
-            avg_prediction = 0.0
-        
-        print_green(f"Average model prediction score: {avg_prediction:.4f}")
-        
-        # Create predictions for each stock
-        for i, stock in enumerate(market):
-            # Use actual prediction if available, otherwise use average with variation
-            if stock in pred_dict:
-                stock_prediction = pred_dict[stock]
-            else:
-                # Fallback: use average prediction with small variation
-                stock_prediction = avg_prediction + (i * 0.001 - 0.01)
+        if comprehensive_predictions:
+            print_green(f"成功預測了 {len(comprehensive_predictions)} 支股票")
             
-            print_green(f"Stock {stock}: prediction = {stock_prediction:.4f}")
+            # 生成選股建議
+            stock_recommendations = generate_stock_recommendations(comprehensive_predictions)
             
-            # Get current stock data for additional context
-            try:
-                stock_current = current_data.loc[current_data.index.get_level_values(0) == stock]
-                if len(stock_current) > 0:
-                    latest_close = float(stock_current['$close'].iloc[-1])
-                    latest_volume_raw = stock_current['$volume'].iloc[-1]
-                    # Handle NaN values for volume
-                    latest_volume = int(latest_volume_raw) if pd.notna(latest_volume_raw) else 1000000
-                    price_change_5d = float((stock_current['$close'].iloc[-1] - stock_current['$close'].iloc[0]) / stock_current['$close'].iloc[0] * 100) if len(stock_current) > 1 else 0.0
-                else:
-                    latest_close = 100.0  # Default price
-                    latest_volume = 1000000  # Default volume
-                    price_change_5d = 0.0
-            except Exception as stock_error:
-                print_yellow(f"Error processing {stock}: {stock_error}")
-                latest_close = 100.0
-                latest_volume = 1000000
-                price_change_5d = 0.0
+            # 處理每支股票的預測結果
+            for stock_symbol, stock_pred in comprehensive_predictions.items():
+                try:
+                    # 基本信息
+                    basic_info = stock_pred.get("basic_info", {})
+                    
+                    # 多時間段收益率預測
+                    multi_horizon = stock_pred.get("multi_horizon_returns", {})
+                    
+                    # 風險指標
+                    risk_metrics = stock_pred.get("risk_metrics", {})
+                    
+                    # 選股評分
+                    selection_scores = stock_pred.get("selection_scores", {})
+                    
+                    # 構建詳細的預測信息
+                    detailed_prediction = {
+                        "basic_info": {
+                            "symbol": stock_symbol,
+                            "company_name": stock_symbol,  # 可以擴展為實際公司名稱
+                            "prediction_date": basic_info.get("prediction_date", ""),
+                            "last_known_return": basic_info.get("last_known_return", 0.0),
+                            "data_points_used": basic_info.get("data_points", 0),
+                            "feature_dimension": basic_info.get("feature_dimension", 0)
+                        },
+                        
+                        "return_forecasts": {
+                            "short_term": {
+                                "1_day": {
+                                    "expected_return": multi_horizon.get("1d", {}).get("expected_return", 0.0),
+                                    "cumulative_return": multi_horizon.get("1d", {}).get("cumulative_return", 0.0),
+                                    "confidence_level": "medium"
+                                },
+                                "3_day": {
+                                    "expected_return": multi_horizon.get("3d", {}).get("expected_return", 0.0),
+                                    "cumulative_return": multi_horizon.get("3d", {}).get("cumulative_return", 0.0),
+                                    "daily_returns": multi_horizon.get("3d", {}).get("daily_returns", []),
+                                    "confidence_level": "medium"
+                                }
+                            },
+                            "medium_term": {
+                                "5_day": {
+                                    "expected_return": multi_horizon.get("5d", {}).get("expected_return", 0.0),
+                                    "cumulative_return": multi_horizon.get("5d", {}).get("cumulative_return", 0.0),
+                                    "daily_returns": multi_horizon.get("5d", {}).get("daily_returns", []),
+                                    "confidence_level": "medium"
+                                },
+                                "7_day": {
+                                    "expected_return": multi_horizon.get("7d", {}).get("expected_return", 0.0),
+                                    "cumulative_return": multi_horizon.get("7d", {}).get("cumulative_return", 0.0),
+                                    "daily_returns": multi_horizon.get("7d", {}).get("daily_returns", []),
+                                    "confidence_level": "low"
+                                }
+                            }
+                        },
+                        
+                        "risk_analysis": {
+                            "volatility": {
+                                "7_day_volatility": risk_metrics.get("volatility_7d", 0.0),
+                                "volatility_percentile": min(100, max(0, risk_metrics.get("volatility_7d", 0.02) * 2500)),
+                                "risk_level": "LOW" if risk_metrics.get("volatility_7d", 0.02) < 0.02 else "MEDIUM" if risk_metrics.get("volatility_7d", 0.02) < 0.04 else "HIGH"
+                            },
+                            "expected_range": {
+                                "min_return_7d": risk_metrics.get("min_return_7d", -0.05),
+                                "max_return_7d": risk_metrics.get("max_return_7d", 0.05),
+                                "expected_return_7d": risk_metrics.get("expected_return_7d", 0.0),
+                                "range_width": risk_metrics.get("max_return_7d", 0.05) - risk_metrics.get("min_return_7d", -0.05)
+                            },
+                            "risk_adjusted_metrics": {
+                                "sharpe_estimate": selection_scores.get("risk_adjusted_return", 0.0),
+                                "risk_reward_ratio": abs(risk_metrics.get("expected_return_7d", 0.0) / max(0.001, risk_metrics.get("volatility_7d", 0.02)))
+                            }
+                        },
+                        
+                        "trading_signals": {
+                            "overall_signal": "BUY" if selection_scores.get("expected_return", 0) > 0.01 else "SELL" if selection_scores.get("expected_return", 0) < -0.01 else "HOLD",
+                            "signal_strength": min(100, max(0, abs(selection_scores.get("expected_return", 0)) * 1000)),
+                            "momentum_signal": "POSITIVE" if multi_horizon.get("7d", {}).get("expected_return", 0) > 0 else "NEGATIVE",
+                            "trend_direction": "UPTREND" if multi_horizon.get("7d", {}).get("expected_return", 0) > 0.005 else "DOWNTREND" if multi_horizon.get("7d", {}).get("expected_return", 0) < -0.005 else "SIDEWAYS"
+                        },
+                        
+                        "selection_scores": {
+                            "composite_score": selection_scores.get("composite_score", 50.0),
+                            "expected_return_score": min(100, max(0, (selection_scores.get("expected_return", 0) + 0.05) * 1000)),
+                            "volatility_score": min(100, max(0, 100 - selection_scores.get("volatility", 0.02) * 2500)),
+                            "risk_adjusted_score": min(100, max(0, (selection_scores.get("risk_adjusted_return", 0) + 1) * 50)),
+                            "percentile_rank": 0  # 稍後計算
+                        },
+                        
+                        "probability_analysis": {
+                            "prob_positive_return": len([r for r in multi_horizon.get("7d", {}).get("daily_returns", []) if r > 0]) / max(1, len(multi_horizon.get("7d", {}).get("daily_returns", []))),
+                            "prob_outperform_market": 0.5,  # 假設值
+                            "prob_exceed_threshold": {
+                                "1_percent": len([r for r in multi_horizon.get("7d", {}).get("daily_returns", []) if r > 0.01]) / max(1, len(multi_horizon.get("7d", {}).get("daily_returns", []))),
+                                "2_percent": len([r for r in multi_horizon.get("7d", {}).get("daily_returns", []) if r > 0.02]) / max(1, len(multi_horizon.get("7d", {}).get("daily_returns", []))),
+                                "5_percent": len([r for r in multi_horizon.get("7d", {}).get("daily_returns", []) if r > 0.05]) / max(1, len(multi_horizon.get("7d", {}).get("daily_returns", [])))
+                            }
+                        },
+                        
+                        "scenario_analysis": {
+                            "bull_scenario": {
+                                "probability": 0.3,
+                                "expected_return": max(multi_horizon.get("7d", {}).get("daily_returns", [0])) if multi_horizon.get("7d", {}).get("daily_returns") else 0.0,
+                                "description": "Optimistic market conditions"
+                            },
+                            "base_scenario": {
+                                "probability": 0.4,
+                                "expected_return": multi_horizon.get("7d", {}).get("expected_return", 0.0),
+                                "description": "Normal market conditions"
+                            },
+                            "bear_scenario": {
+                                "probability": 0.3,
+                                "expected_return": min(multi_horizon.get("7d", {}).get("daily_returns", [0])) if multi_horizon.get("7d", {}).get("daily_returns") else 0.0,
+                                "description": "Pessimistic market conditions"
+                            }
+                        },
+                        
+                        "daily_forecast": {}
+                    }
+                    
+                    # 添加每日預測詳情
+                    daily_returns = multi_horizon.get("7d", {}).get("daily_returns", [])
+                    for i, date in enumerate(future_dates[:len(daily_returns)]):
+                        detailed_prediction["daily_forecast"][date.strftime("%Y-%m-%d")] = {
+                            "predicted_return": daily_returns[i],
+                            "confidence": "medium",
+                            "trading_day": i + 1,
+                            "cumulative_return": sum(daily_returns[:i+1]),
+                            "signal": "BUY" if daily_returns[i] > 0.01 else "SELL" if daily_returns[i] < -0.01 else "HOLD"
+                        }
+                    
+                    prediction_output["predictions"][stock_symbol] = detailed_prediction
+                    
+                except Exception as stock_error:
+                    print_yellow(f"處理 {stock_symbol} 預測結果時出錯: {stock_error}")
+                    continue
             
-            # Determine trend
-            prediction_trend = "上升" if stock_prediction > 0.02 else "下跌" if stock_prediction < -0.02 else "持平"
+            # 計算百分位排名
+            all_scores = [pred["selection_scores"]["composite_score"] for pred in prediction_output["predictions"].values()]
+            if all_scores:
+                for stock_symbol, pred in prediction_output["predictions"].items():
+                    score = pred["selection_scores"]["composite_score"]
+                    percentile = (sum(1 for s in all_scores if s < score) / len(all_scores)) * 100
+                    prediction_output["predictions"][stock_symbol]["selection_scores"]["percentile_rank"] = round(percentile, 1)
             
-            # Generate risk assessment
-            volatility = abs(price_change_5d)
-            risk_level = "高" if volatility > 5 else "中" if volatility > 2 else "低"
-            
-            # Generate recommendation
-            if stock_prediction > 0.05:
-                recommendation = "強烈買入"
-                confidence = "高"
-            elif stock_prediction > 0.02:
-                recommendation = "買入"
-                confidence = "中"
-            elif stock_prediction > -0.02:
-                recommendation = "持有"
-                confidence = "中"
-            elif stock_prediction > -0.05:
-                recommendation = "賣出"
-                confidence = "中"
-            else:
-                recommendation = "強烈賣出"
-                confidence = "高"
-            
-            # Store comprehensive analysis
-            stock_analysis[stock] = {
-                "prediction_score": round(stock_prediction, 4),
-                "prediction_trend": prediction_trend,
-                "recommendation": recommendation,
-                "confidence": confidence,
-                "risk_level": risk_level,
-                # "current_price": round(latest_close, 2),
-                "volume": int(latest_volume),
-                "price_change_5d_pct": round(price_change_5d, 2),
-                "volatility": round(volatility, 2)
+            # 添加投資組合級別的分析
+            prediction_output["portfolio_analysis"] = {
+                "top_picks": [],
+                "avoid_list": [],
+                "sector_analysis": {},
+                "risk_distribution": {
+                    "low_risk": len([p for p in prediction_output["predictions"].values() if p["risk_analysis"]["volatility"]["risk_level"] == "LOW"]),
+                    "medium_risk": len([p for p in prediction_output["predictions"].values() if p["risk_analysis"]["volatility"]["risk_level"] == "MEDIUM"]),
+                    "high_risk": len([p for p in prediction_output["predictions"].values() if p["risk_analysis"]["volatility"]["risk_level"] == "HIGH"])
+                },
+                "signal_distribution": {
+                    "buy_signals": len([p for p in prediction_output["predictions"].values() if p["trading_signals"]["overall_signal"] == "BUY"]),
+                    "hold_signals": len([p for p in prediction_output["predictions"].values() if p["trading_signals"]["overall_signal"] == "HOLD"]),
+                    "sell_signals": len([p for p in prediction_output["predictions"].values() if p["trading_signals"]["overall_signal"] == "SELL"])
+                }
             }
             
-            # Generate daily predictions
-            for j, date in enumerate(future_dates):
-                date_str = date.strftime("%Y-%m-%d")
-                if date_str not in future_pred_dict:
-                    future_pred_dict[date_str] = {}
-                
-                # Add some time-based variation to predictions
-                time_factor = 1 + (j * 0.001)  # Slight decay over time
-                daily_pred = stock_prediction * time_factor
-                future_pred_dict[date_str][stock] = round(daily_pred, 4)
-        
-        # Sort stocks by prediction score for ranking
-        sorted_stocks = sorted(stock_analysis.items(), key=lambda x: x[1]['prediction_score'], reverse=True)
-        
-        # Create top recommendations
-        top_picks = []
-        for i, (stock, analysis) in enumerate(sorted_stocks[:5]):
-            top_picks.append({
-                "rank": i + 1,
-                "symbol": stock,
-                "prediction_score": analysis['prediction_score'],
-                "recommendation": analysis['recommendation'],
-                "reason": f"預測趨勢{analysis['prediction_trend']}, 風險等級{analysis['risk_level']}, 5日漲跌{analysis['price_change_5d_pct']}%"
-            })
-        
-        # Create comprehensive prediction output
-        prediction_output = {
-            "report_date": today_str + " " + pd.Timestamp.now().strftime("%H:%M:%S"),
-            "prediction_period": f"{future_start.strftime('%Y-%m-%d')} to {future_end.strftime('%Y-%m-%d')}",
-            "training_period": f"{start_date_str} to {train_end_date_str}",
-            "validation_period": f"{train_end_date_str} to {today_str}",
-            "model_type": f"{model}",
-            "total_instruments": len(market),
-            "model_performance": model_metrics,  # Add model evaluation metrics
-            "analysis_summary": {
-                "市場概況": {
-                    "分析股票數": len(market),
-                    "推薦買入": len([s for s in stock_analysis.values() if "買入" in s['recommendation']]),
-                    "推薦賣出": len([s for s in stock_analysis.values() if "賣出" in s['recommendation']]),
-                    "推薦持有": len([s for s in stock_analysis.values() if s['recommendation'] == "持有"])
+            # 生成投資建議
+            sorted_predictions = sorted(
+                prediction_output["predictions"].items(),
+                key=lambda x: x[1]["selection_scores"]["composite_score"],
+                reverse=True
+            )
+            
+            prediction_output["portfolio_analysis"]["top_picks"] = [
+                {
+                    "symbol": symbol,
+                    "score": pred["selection_scores"]["composite_score"],
+                    "expected_7d_return": pred["return_forecasts"]["medium_term"]["7_day"]["expected_return"],
+                    "risk_level": pred["risk_analysis"]["volatility"]["risk_level"],
+                    "signal": pred["trading_signals"]["overall_signal"],
+                    "reason": f"高綜合評分 ({pred['selection_scores']['composite_score']:.1f}分)"
                 }
-            },
-            "top_recommendations": top_picks,
-            "detailed_analysis": stock_analysis,
-            "daily_predictions": future_pred_dict,
-            "risk_disclaimer": "本預測基於歷史數據和機器學習模型，僅供參考，投資有風險，請謹慎決策。",
-            "model_info": {
-                "算法": f"{model}",
-                "特徵工程": "Alpha158",
-                "訓練數據量": "約4年歷史數據",
-                "驗證期間": f"{train_end_date_str} 至 {today_str}",
-                "預測數據樣本": len(pred_values) if 'pred_values' in locals() else 0,
-                "平均預測分數": round(avg_prediction, 6) if 'avg_prediction' in locals() else 0
-            },
+                for symbol, pred in sorted_predictions[:10]
+            ]
+            
+            prediction_output["portfolio_analysis"]["avoid_list"] = [
+                {
+                    "symbol": symbol,
+                    "score": pred["selection_scores"]["composite_score"],
+                    "expected_7d_return": pred["return_forecasts"]["medium_term"]["7_day"]["expected_return"],
+                    "risk_level": pred["risk_analysis"]["volatility"]["risk_level"],
+                    "signal": pred["trading_signals"]["overall_signal"],
+                    "reason": f"低綜合評分 ({pred['selection_scores']['composite_score']:.1f}分)"
+                }
+                for symbol, pred in sorted_predictions[-5:]
+            ]
+            
+            # 添加推薦建議
+            prediction_output["investment_recommendations"] = stock_recommendations
+            
+            print_green(f"✓ 完成 {len(prediction_output['predictions'])} 支股票的詳細預測")
+            
+        else:
+            print_yellow("未能獲取有效的預測結果，生成基礎預測...")
+            
+            # 生成基礎預測作為後備
+            for stock in market:
+                prediction_output["predictions"][stock] = {
+                    "basic_info": {
+                        "symbol": stock,
+                        "prediction_date": pd.Timestamp.now().strftime("%Y-%m-%d"),
+                        "status": "fallback_prediction"
+                    },
+                    "return_forecasts": {
+                        "medium_term": {
+                            "7_day": {
+                                "expected_return": 0.0,
+                                "cumulative_return": 0.0,
+                                "confidence_level": "low"
+                            }
+                        }
+                    },
+                    "risk_analysis": {
+                        "volatility": {
+                            "risk_level": "MEDIUM",
+                            "7_day_volatility": 0.02
+                        }
+                    },
+                    "trading_signals": {
+                        "overall_signal": "HOLD",
+                        "signal_strength": 50
+                    },
+                    "selection_scores": {
+                        "composite_score": 50.0
+                    }
+                }
 
-        }
+    except Exception as pred_error:
+        print_red(f"預測過程中出現錯誤: {pred_error}")
+        import traceback
+        traceback.print_exc()
         
-        # Save to future.json
+        # 創建錯誤報告
+        prediction_output["error"] = {
+            "message": str(pred_error),
+            "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "status": "prediction_failed"
+        }
+
+    # 保存預測結果到 JSON 文件
+    try:
         with open("future.json", "w", encoding="utf-8") as f:
             # -------------------------------------------------------------------
             json.dump(prediction_output, f, ensure_ascii=False, indent=2)
         
-        print_green("完整預測報告已保存到 future.json")
-        print_green(f"預測期間: {prediction_output['prediction_period']}")
-        print_green(f"分析股票數: {prediction_output['total_instruments']}")
+        print_green("✓ 詳細預測報告已保存到 future.json")
+        print_green("預測報告包含以下內容:")
+        print_green("  - 多時間段收益率預測 (1天, 3天, 5天, 7天)")
+        print_green("  - 風險分析 (波動率, 風險等級, 預期範圍)")
+        print_green("  - 交易信號 (買入/賣出/持有建議)")
+        print_green("  - 選股評分 (綜合評分, 百分位排名)")
+        print_green("  - 概率分析 (正收益概率, 超越門檻概率)")
+        print_green("  - 情景分析 (牛市/基準/熊市情景)")
+        print_green("  - 每日預測詳情")
+        print_green("  - 投資組合級別分析")
+        print_green("  - 投資建議 (頂級推薦, 避險清單)")
         
-        # Display model performance metrics
-        if 'model_performance' in prediction_output and prediction_output['model_performance']:
-            print_green("模型性能指標:")
-            metrics = prediction_output['model_performance']
-            if 'validation_samples' in metrics:
-                print_green(f"  - 驗證樣本數: {metrics['validation_samples']}")
-            if 'r2_score' in metrics:
-                print_green(f"  - R² 決定係數: {metrics['r2_score']:.4f}")
-            if 'information_coefficient' in metrics:
-                print_green(f"  - 信息係數 (IC): {metrics['information_coefficient']:.4f}")
-            if 'rank_ic' in metrics:
-                print_green(f"  - 排名IC: {metrics['rank_ic']:.4f}")
-            if 'direction_accuracy' in metrics:
-                print_green(f"  - 方向準確率: {metrics['direction_accuracy']:.4f} ({metrics['direction_accuracy']*100:.2f}%)")
-            if 'rmse' in metrics:
-                print_green(f"  - 均方根誤差: {metrics['rmse']:.6f}")
-        
-        print_green("前5名推薦:")
-        for pick in prediction_output['top_recommendations']:
-            print_green(f"  {pick['rank']}. {pick['symbol']} - {pick['recommendation']} (評分: {pick['prediction_score']})")
-        
-    except Exception as e:
-        warn_with_color(f"生成預測時發生錯誤: {e}")
-        # Save error information but with current stock info as fallback
-        print_yellow("生成備用預測報告...")
-        
-        # Get basic current data for fallback
-        try:
-            fallback_data = D.features(
-                market[:10],  # Limit to 10 stocks for fallback
-                ["$close"],
-                start_time=(today - pd.Timedelta(days=days)).strftime("%Y-%m-%d"),
-                end_time=today_str,
-                freq="day"
-            )
+        # 顯示關鍵統計信息
+        if "predictions" in prediction_output and prediction_output["predictions"]:
+            total_stocks = len(prediction_output["predictions"])
+            buy_signals = len([p for p in prediction_output["predictions"].values() 
+                            if p.get("trading_signals", {}).get("overall_signal") == "BUY"])
+            avg_expected_return = np.mean([p.get("return_forecasts", {}).get("medium_term", {}).get("7_day", {}).get("expected_return", 0) 
+                                        for p in prediction_output["predictions"].values()])
             
-            fallback_predictions = {}
-            future_dates = pd.bdate_range(start=future_start, end=future_end, freq='B')
+            print_green(f"預測統計:")
+            print_green(f"  - 總股票數: {total_stocks}")
+            print_green(f"  - 買入信號: {buy_signals} ({buy_signals/total_stocks*100:.1f}%)")
+            print_green(f"  - 平均預期7日收益率: {avg_expected_return*100:.3f}%")
             
-            for stock in market[:10]:
-                fallback_predictions[stock] = {
-                    "prediction_score": 0.0,
-                    "recommendation": "數據不足",
-                    "confidence": "低",
-                    "note": "備用預測"
-                }
-            
-            for date in future_dates:
-                date_str = date.strftime("%Y-%m-%d")
-                if date_str not in future_pred_dict:
-                    future_pred_dict[date_str] = {}
-                for stock in market[:10]:
-                    future_pred_dict[date_str][stock] = 0.0
-                    
-        except:
-            fallback_predictions = {}
-            future_pred_dict = {}
-        
-        error_output = {
-            "report_date": today_str + " " + pd.Timestamp.now().strftime("%H:%M:%S"),
-            "error": str(e),
-            "status": "部分失敗",
-            "training_period": f"{start_date_str} to {train_end_date_str}",
-            "validation_period": f"{train_end_date_str} to {today_str}",
-            "model_type": "LGBModel",
-            "total_instruments": len(market),
-            "fallback_analysis": fallback_predictions,
-            "daily_predictions": future_pred_dict,
-            "message": "預測生成遇到問題，已提供備用分析"
-        }
-        
-        with open("future.json", "w", encoding="utf-8") as f:
-            json.dump(error_output, f, ensure_ascii=False, indent=2)
+            if "portfolio_analysis" in prediction_output:
+                print_green(f"  - 頂級推薦: {len(prediction_output['portfolio_analysis']['top_picks'])} 支")
+                print_green(f"  - 避險清單: {len(prediction_output['portfolio_analysis']['avoid_list'])} 支")
 
-    # Skip analysis that requires proper label-prediction alignment
-    # These analysis functions need properly structured data and can fail with limited datasets
-    # Temporarily disabled to avoid variable scope issues
-    print_yellow("Skipping detailed analysis to avoid data scope issues")
-    subprocess.run(["python", "fix_dog.py"])
-    print_green("Pipeline completed successfully!")
+    except Exception as save_error:
+        print_red(f"保存預測結果時出錯: {save_error}")
+
+    print_green("股票預測分析完成！")
+
 
 
 def main():
     run(
         model="TransformerModel",
-        market_num=300,
-        days=7,
+        market_num=50,
+        days=9,
     )
 
 

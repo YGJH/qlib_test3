@@ -79,3 +79,18 @@ mse: 0.847211...
 [transformer.py:236] - training...
 [transformer.py:238] - evaluating...
 [transformer.py:241] - train -0.372366, valid nan
+
+
+
+🏆 最佳 seed = 19523, RMSE = 1.168537
+Model Performance Metrics:
+  - Validation Samples: 21951
+  - R² Score: -0.0003
+  - RMSE: 1.168537
+  - Information Coefficient: 0.0044
+  - Rank IC: 0.0050
+  - Direction Accuracy: 0.5008
+
+
+🏆 最佳 seed = 134377, RMSE = 1.193124
+🏆 最佳 market_num = 50, RMSE = 1.171710
