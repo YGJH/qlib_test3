@@ -46,45 +46,23 @@ def check_gpu():
 def get_market(market_num):
     try:
         # Read instruments directly from the file
-        instruments_file = Path(".qlib/qlib_data/us_data/instruments/all.txt")
-        if instruments_file.exists():
-            with open(instruments_file, 'r') as f:
-                lines = f.readlines()
-            
-            # Parse the instrument names (first column)
-            available_instruments = []
-            for line in lines:
-                line = line.strip()
-                if line and not line.startswith('#'):  # Skip comments and empty lines
-                    parts = line.split('\t')
-                    if len(parts) >= 1:
-                        symbol = parts[0].strip()
-                        available_instruments.append(symbol)
-            
-            print_green(f"Found {len(available_instruments)} instruments in instruments file")
-            if len(available_instruments) > 0:
-                print_green(f"Sample instruments: {available_instruments[:10]}")
-            else:
-                warn_with_color("No instruments found in all.txt file")
-                raise ValueError("No instruments found in all.txt file")
-        else:
-            warn_with_color(f"Instruments file not found: {instruments_file}")
-            raise FileNotFoundError("Instruments file missing")
-        
+        instruments_file = Path(".qlib/qlib_data/us_data/features")
+        available_instruments = os.listdir(instruments_file)
         # Filter to common US stocks (remove indices that start with ^ and _)
         us_stocks = available_instruments
-        print_green(f"Filtered to {len(us_stocks)} US stocks (excluding indices)")
 
+        print(available_instruments[:10])
+        print_green(f"Filtered to {len(us_stocks)} US stocks (excluding indices) {us_stocks[:10]}...")
         if len(us_stocks) > 0:
             market = us_stocks
             if market_num is not None:
-                print_green(f"Limiting market to {market_num} instruments")
                 avaliable_sym = set(us_stocks)&set(symbols['US'])
                 market = list(avaliable_sym)[:min(len(market), market_num)]  # Limit to specified number
             else:
                 print_green("No market limit specified, using all available US stocks")
                 avaliable_sym = set(us_stocks)&set(symbols['US'])
                 market = list(avaliable_sym)
+            market = ['chfusd=x', 'eurusd=x', 'usdcny=x', 'usdtwd=x', '^dji', '^ndx'] + market
             print_yellow(f"Selected {len(market)} instruments from US stocks: {market[:min(10, len(market))]}...")
             # 驗證這些symbols是否真的有數據
             print_green("Verifying data availability for selected instruments...")
@@ -98,7 +76,7 @@ def get_market(market_num):
             
             if len(valid_instruments) > 0:
                 market = valid_instruments
-                print_green(f"Final selection: {len(market)} instruments with data: {market[:min(10, len(market))]}")
+                print_green(f"Final selection: {len(market)} instruments with data: {market}")
                 # Use the first available instrument as benchmark since SPY might not be available
                 benchmark = market[0] if len(market) > 0 else None
             else:
@@ -198,9 +176,8 @@ def run(model="LGBModel",market_num=None, days=6):
 
     check_gpu()
     # NOTE: need to download data from remote: python scripts/get_data.py qlib_data_cn --target_dir ~/.qlib/qlib_data/cn_data
-    provider_uri = ".qlib/qlib_data/us_data"  # target_dir
+    provider_uri=".qlib/qlib_data/us_data"
     qlib.init(provider_uri=provider_uri, region=REG_US)
-
     def analyze_feature_importance(model, dataset):
         """分析特徵重要性"""
         try:
@@ -226,6 +203,10 @@ def run(model="LGBModel",market_num=None, days=6):
         except Exception as e:
             print(f"特徵重要性分析失敗: {e}")
             return None
+        
+
+
+
 
 
 
@@ -265,7 +246,6 @@ def run(model="LGBModel",market_num=None, days=6):
     print_green(f"  - Validation: {train_end_date_str} to {valid_end_date_str}")
     print_green(f"  - Test: {valid_end_date_str} to {today_str}")
 
-
     try:
         # 指定資料目錄
         features_dir = ".qlib/qlib_data/us_data/features"
@@ -280,6 +260,8 @@ def run(model="LGBModel",market_num=None, days=6):
             print_green(f"支持的因子字段: {fields}")
         else:
             print_green(f"未找到股票 {instrument} 的特徵資料")
+        
+        from qlib.data import D
         stock_data = D.features(
             instruments=market,
             fields=['$close', '$factor', '$high', '$low', '$open', '$volume'],
@@ -287,8 +269,18 @@ def run(model="LGBModel",market_num=None, days=6):
             end_time=today_str,
             freq="day"
         )
+        # ============ FX 特殊处理 ===========
+        # 将这四个汇率的 $factor 填充为 1.0
+        fx_symbols = {"CHFUSD=X", "EURUSD=X", "USDCNY=X", "USDTWD=X"}
+        mask = stock_data.index.get_level_values("instrument").isin(fx_symbols)
+        stock_data.loc[mask, '$factor'] = 1.0
+        # 或者对全表空值统一填充：
+        # stock_data['$factor'].fillna(1.0, inplace=True)
+        # ====================================
+
         print_green("前幾支股票的開盤價:")
         print_green(stock_data)
+
     except Exception as e:
         print_green(f"提取開盤價時發生錯誤: {e}")
 
@@ -708,10 +700,38 @@ def run(model="LGBModel",market_num=None, days=6):
         label_df = dataset.prepare("test", col_set="label")
         label_df.columns = ['label']
         pred_label = pd.concat([label_df, pred_df], axis=1).reindex(label_df.index)
-        fig_ic     = analysis_position.score_ic_graph(pred_label, show_notebook=False)
-        # score IC
-        # model performance (returns list of Figures)
-        model_figs = analysis_model.model_performance_graph(pred_label, show_notebook=False)
+        
+        if pred_label['label'].isna().all():
+            from qlib.data import D
+            # get close prices over same test segment
+            close_df = D.features(
+                instruments=market,
+                fields=['$close'],
+                start_time=valid_end_date_str,
+                end_time=today_str,
+                freq='day'
+            )
+            # compute pct change per instrument
+            fx_ret = close_df.groupby(level='instrument').pct_change().rename('label')
+            # fill only missing label slots
+            pred_label['label'] = pred_label['label'].fillna(fx_ret)
+
+
+        fig_ic = analysis_position.score_ic_graph(pred_label, show_notebook=False)
+
+        # ============ 修复 group_return “df is empty” 错误 ===========
+        # 计算一下每个交易日的样本数，取最小值 min_count
+        group_counts = pred_label.groupby(level="datetime").size()
+        min_count = int(group_counts.min()) if not group_counts.empty else 0
+        # 设定 N 不超过 5 也不超过 min_count（至少为 1）
+        N = min(5, min_count) if min_count >= 1 else 1
+
+        # 调用 model_performance_graph 并传入调整后的 N
+        model_figs = analysis_model.model_performance_graph(
+            pred_label,
+            show_notebook=False,
+            N=N
+        )
         
         check_predict_data(pred_label)
 
@@ -731,17 +751,37 @@ def run(model="LGBModel",market_num=None, days=6):
 
         print_green("Portfolio analysis saved successfully!")
 
+    try:
+
+        with open("best_transformer.pkl", "rb") as f:
+            model = pickle.load(f)
+        dataset = init_instance_by_config(task["dataset"])
+        gen_future_predictions(
+            future_day = 10,
+            model = model,
+            dataset = dataset,
+            market = market,
+            model_metrics = model_metrics
+        )
+    except Exception as e:
+        warn_with_color(e)
+        
+
+
+def gen_future_predictions(future_day , model, dataset, market ,model_metrics):
     ###################################
     # Generate future predictions
     ###################################
     print_green("Generating future predictions...")
 
     # 導入預測函數
+    import numpy as np
     from predict_function import comprehensive_predict, generate_stock_recommendations
 
     # 創建未來預測的數據結構
+    today = pd.Timestamp.now().normalize()
     future_start = today
-    future_end = today + pd.Timedelta(days=days)
+    future_end = today + pd.Timedelta(days=future_day)
     future_dates = pd.bdate_range(start=future_start, end=future_end, freq='B')
 
     print_green(f"預測期間: {future_start.strftime('%Y-%m-%d')} 到 {future_end.strftime('%Y-%m-%d')}")
@@ -753,7 +793,7 @@ def run(model="LGBModel",market_num=None, days=6):
             "prediction_date": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
             "prediction_start": future_start.strftime("%Y-%m-%d"),
             "prediction_end": future_end.strftime("%Y-%m-%d"),
-            "prediction_horizon_days": days,
+            "prediction_horizon_days": future_day,
             "business_days": len(future_dates),
             "model_type": model.__class__.__name__,
             "total_instruments": len(market),
@@ -773,7 +813,7 @@ def run(model="LGBModel",market_num=None, days=6):
             model=model,
             dataset=dataset,
             chunk=market,
-            steps=days
+            steps=future_day
         )
         
         if comprehensive_predictions:
@@ -1072,8 +1112,8 @@ def run(model="LGBModel",market_num=None, days=6):
 def main():
     run(
         model="TransformerModel",
-        market_num=50,
-        days=9,
+        market_num=10,
+        days=4,
     )
 
 

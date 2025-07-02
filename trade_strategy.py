@@ -9,6 +9,7 @@ from qlib.workflow.record_temp import SignalRecord, PortAnaRecord
 from qlib.backtest.executor import SimulatorExecutor
 from qlib.contrib.strategy.signal_strategy import TopkDropoutStrategy
 from config_task import *
+from main import get_market
 
 
 def main():
@@ -22,39 +23,31 @@ def main():
         model = pickle.load(f)
 
     # 3. 构造数据集配置（直接写在脚本里，不依赖 config_task）
-    instruments = get # 示例标的
-    data_handler_config = {
-        "start_time": "2019-01-01",
-        "end_time": "2025-06-18",
-        "fit_start_time": "2019-01-01",
-        "fit_end_time": "2024-12-31",
-        "instruments": instruments,
-        "infer_processors": [
-            {"class": "RobustZScoreNorm", "kwargs": {"clip_outlier": True, "fit_start_time": "2019-01-01"}},
-            {"class": "Fillna", "kwargs": {"fill_value": 0}}
-        ],
-        "learn_processors": [
-            {"class": "DropnaLabel"},
-            {"class": "CSRankNorm"}
-        ],
-    }
-    dataset_cfg = {
-        "class": "DatasetH",
-        "module_path": "qlib.data.dataset",
-        "kwargs": {
-            "handler": {
-                "class": "Alpha158",
-                "module_path": "qlib.contrib.data.handler",
-                "kwargs": data_handler_config,
-            },
-            "segments": {
-                "train": (start_date_str, train_end_date_str),
-                "valid": (train_end_date_str, valid_end_date_str),
-                "test":  (valid_end_date_str, today_str),
-            },
-        },
-    }
-    dataset = init_instance_by_config(dataset_cfg)
+    market , benchmark = get_market(market_num=50)
+
+    start_date_str, train_end_date_str, valid_end_date_str, today_str, today = get_date(days)
+
+    data_handler_config = get_data_handler_config(market=market,
+                                                start_date_str=start_date_str,
+                                                train_end_date_str=train_end_date_str,
+                                                valid_end_date_str=valid_end_date_str,
+                                                today_str=today_str)
+    test_data(
+        market=market,
+        start_date_str=start_date_str,
+        today_str=today_str,
+    )
+    task = get_task(
+        start_date_str=start_date_str,
+        train_end_date_str=train_end_date_str,
+        valid_end_date_str=valid_end_date_str,
+        today_str=today_str,
+        data_handler_config=data_handler_config,
+        today=today,
+        market=market,
+        model="TransformerModel"
+    )
+    dataset = init_instance_by_config(task["dataset"])
 
     # 4. 配置策略和执行器
     strategy = TopkDropoutStrategy(model=model, dataset=dataset, topk=50, n_drop=5)
@@ -66,7 +59,7 @@ def main():
         "benchmark":  "SPY",
         "exchange_kwargs": {
             "freq":         "day",
-            "codes":        instruments,
+            "codes":        market,
             "open_cost":    0.0005,
             "close_cost":   0.0015,
             "min_cost":     5,
@@ -75,19 +68,39 @@ def main():
 
     # 5. 运行回测并保存信号/组合表现
     with R.start(experiment_name="trade_strategy"):
-        # 生成交易信号
+        recorder = R.get_recorder()
+
+        # 1) 先做 SignalRecord
         sr = SignalRecord(
-            model=model,
-            dataset=dataset,
-            strategy=strategy,
-            executor=executor,
-            backtest=backtest_config
+            model=model,      # 已训练好的模型
+            dataset=dataset,  # Qlib DatasetH 实例
+            recorder=recorder
         )
-        sr.generate()  # sr.data["trade"] 包含逐笔买卖信号
-        # 生成投资组合评估
-        pr = PortAnaRecord(record=sr)
-        pr.generate()  # pr.data["portfolio"] 包含净值曲线、指标等
-        R.save_objects()  # 存档模型、信号、回测结果
+        sr.generate()  # 保存 pred.pkl, label.pkl 等
+
+        # 2) 再做 Portfolio Analysis
+        #    需要传入 recorder 和完整的 config dict
+        pa_config = {
+            "strategy": {
+                "class": "TopkDropoutStrategy",
+                "module_path": "qlib.contrib.strategy.signal_strategy",
+                "kwargs": {
+                    "signal": sr.load("pred.pkl"),  # 用刚存的预测
+                    "topk": 50,
+                    "n_drop": 5,
+                },
+            },
+            "backtest": backtest_config,
+        }
+        pr = PortAnaRecord(
+            recorder=recorder,
+            config=pa_config
+        )
+        pr.generate()  # 保存 report_normal_...、positions_normal_...、port_analysis_... 等
+
+        # 3) 最后落盘
+        recorder.save_objects()
+
 
     # 6. 导出并查看买卖信号
     trades = sr.data["trade"].reset_index()

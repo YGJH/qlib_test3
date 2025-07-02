@@ -6,7 +6,7 @@ from qlib.utils import init_instance_by_config
 from colors import print_green, print_yellow, warn_with_color, Colors
 def get_date(day):
     # Calculate date ranges for training and validation
-    start_date = pd.Timestamp("2019-01-01")  # Match data collector start date
+    start_date = pd.Timestamp("2024-01-01")  # Match data collector start date
     today = pd.Timestamp.now().normalize()  # Normalize to remove time component
 
     # --format='ISO8601'
@@ -296,7 +296,18 @@ def get_task(
                 "handler": {
                     "class": "Alpha158",
                     "module_path": "qlib.contrib.data.handler",
-                    "kwargs": data_handler_config,
+                    "kwargs": {
+                        **data_handler_config,
+                        # after all infer/learn processors, fill NaN with 0.0:
+                        "infer_processors": [
+                            *data_handler_config.get("infer_processors", []),
+                            {"class": "Fillna", "kwargs": {"fill_value": 0.0}},
+                        ],
+                        "learn_processors": [
+                            *data_handler_config.get("learn_processors", []),
+                            {"class": "Fillna", "kwargs": {"fill_value": 0.0}},
+                        ],
+                    },
                 },
                 "segments": {
                     "train": (start_date_str, train_end_date_str),
@@ -312,17 +323,17 @@ def get_task(
         task = {
             "model": {
                 "class": "TransformerModel",
-                "module_path": "new_transformer",
+                "module_path": "transformer",
                 "kwargs": {
                     # 特徵維度，通常是 handler 輸出特徵的數量
                     "d_feat": get_dfeat(transformer_dataset_cfg),   # now matches total_cols−1
                     "d_model": 256,
                     # Attention heads 數量
-                    "nhead": 64,
+                    "nhead": 32,
                     # Transformer 層數
-                    "num_layers": 256,
+                    "num_layers": 128,
                     # Feed-forward 隱藏層維度
-                    "dim_feedforward": 256,
+                    "dim_feedforward": 1024,
                     # dropout 機率
                     "dropout": 0.001,
                     "use_amp": False,  # 是否使用自動混合精度
@@ -330,18 +341,18 @@ def get_task(
                     "activation": "relu",
                     # 訓練相關超參數
                     "optimizer": "AdamW",
-                    "learning_rate": 1e-7,
-                    "batch_size": 128,
-                    "n_epochs": 128,
-                    "loss": "mse_ic2",
-                    "alpha": 0.5,  # 用於 mse_ic 的正則化項
-                    "beta" : 0.5,  # 用於 mse_ic 的正則化項
+                    "learning_rate": 1e-4,
+                    "batch_size": 64,
+                    "n_epochs": 1024,
+                    "loss": "mse_ic",
+                    "alpha": 0.8,  # 用於 mse_ic 的正則化項
+                    "beta" : 0.2,  # 用於 mse_ic 的正則化項
                     "metric": "loss",
                     # 如果有 GPU 可指定 "cuda"
                     "device": "cuda",
                     "seed": 19523,
                     # 早停輪數
-                    "early_stop": 16,
+                    "early_stop":32,
                 },
             },
             "dataset": transformer_dataset_cfg,

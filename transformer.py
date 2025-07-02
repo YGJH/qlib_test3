@@ -30,10 +30,6 @@ from qlib.data.dataset.handler import DataHandlerLP
 
 # qrun examples/benchmarks/Transformer/workflow_config_transformer_Alpha360.yaml ”
 
-try:
-    from colors import *
-except ImportError:
-    pass
 
 class TransformerModel(Model):
     def __init__(
@@ -49,7 +45,7 @@ class TransformerModel(Model):
         metric="",
         early_stop=5,
         loss="mse",
-        optimizer="adamw",
+        optimizer="adam",
         reg=1e-3,
         use_amp:bool = False,
         n_jobs=10,
@@ -59,6 +55,7 @@ class TransformerModel(Model):
         beta=0.5,
         **kwargs,
     ):
+        # set hyper-parameters.
         self.use_amp = use_amp
         self.alpha = alpha if alpha is not None else 0.5
         self.beta = beta if beta is not None else 0.5
@@ -96,6 +93,7 @@ class TransformerModel(Model):
             self.train_optimizer = optim.RMSprop(self.model.parameters(), lr=self.lr, weight_decay=self.reg)
         else:
             raise NotImplementedError("optimizer {} is not supported!".format(optimizer))
+
         p = sum(p.numel() for p in self.model.parameters())
         print_green(f"Total params: {p / 1e6:.1f} M")
 
@@ -152,12 +150,20 @@ class TransformerModel(Model):
         raise ValueError("unknown loss `%s`" % self.loss)
 
     def metric_fn(self, pred, label):
-        mask = torch.isfinite(label)
-
+        mask = torch.isfinite(label)  # filter out NaN values in label
         if self.metric in ("", "loss"):
             return -self.loss_fn(pred[mask], label[mask])
-
-        raise ValueError("unknown metric `%s`" % self.metric)
+        elif self.metric == "ic":
+            # Information Coefficient (Pearson correlation between pred and label)
+            pred_flat = pred.view(-1)
+            label_flat = label.view(-1)
+            pred_mean = pred_flat.mean()
+            label_mean = label_flat.mean()
+            cov = ((pred_flat - pred_mean) * (label_flat - label_mean)).mean()
+            denom = pred_flat.std() * label_flat.std()
+            return (cov / denom).item() if denom != 0 else 0.0
+        else:
+            raise ValueError("unknown metric `%s`" % self.metric)
 
     def train_epoch(self, x_train, y_train):
         x_train_values = x_train.values
@@ -168,12 +174,13 @@ class TransformerModel(Model):
         indices = np.arange(len(x_train_values))
         np.random.shuffle(indices)
 
-        for i in range(0 , len(indices) , self.batch_size):
+        for i in range(len(indices))[:: self.batch_size]:
             if len(indices) - i < self.batch_size:
                 break
 
-            feature = torch.from_numpy(x_train_values[indices[i : i + self.batch_size]]).contiguous().float().to(self.device)
-            label = torch.from_numpy(y_train_values[indices[i : i + self.batch_size]]).contiguous().float().to(self.device)
+            feature = torch.from_numpy(x_train_values[indices[i : i + self.batch_size]]).float().to(self.device)
+            label = torch.from_numpy(y_train_values[indices[i : i + self.batch_size]]).float().to(self.device)
+
             self.train_optimizer.zero_grad()
             if self.use_amp:
                 with torch.amp.autocast('cuda'):
@@ -192,8 +199,6 @@ class TransformerModel(Model):
                 torch.nn.utils.clip_grad_value_(self.model.parameters(), 3.0)
                 self.train_optimizer.step()
 
-
-
     def test_epoch(self, data_x, data_y):
         # prepare training data
         x_values = data_x.values
@@ -207,8 +212,8 @@ class TransformerModel(Model):
         indices = np.arange(len(x_values))
 
         for i in range(len(indices))[:: self.batch_size]:
-            end = min(i + self.batch_size, len(indices))
-            batch_idx = indices[i:end]
+            if len(indices) - i < self.batch_size:
+                break
 
             feature = torch.from_numpy(x_values[indices[i : i + self.batch_size]]).float().to(self.device)
             label = torch.from_numpy(y_values[indices[i : i + self.batch_size]]).float().to(self.device)
@@ -219,33 +224,37 @@ class TransformerModel(Model):
                 losses.append(loss.item())
 
                 score = self.metric_fn(pred, label)
-                scores.append(score.item())
+                if self.metric in ("", "loss"):
+                    scores.append(score.item())
+                elif self.metric in ("ic", "corr"):
+                    scores.append(score)
 
-        if not losses:
-            return 0.0, 0.0
-        return float(np.mean(losses)), float(np.mean(scores))
+        return np.mean(losses), np.mean(scores)
+
     def fit(
         self,
         dataset: DatasetH,
         evals_result=dict(),
         save_path=None,
     ):
-        df_train, df_valid = dataset.prepare(
-            ["train", "valid"],
+        df_train, df_valid, df_test = dataset.prepare(
+            ["train", "valid", "test"],
             col_set=["feature", "label"],
             data_key=DataHandlerLP.DK_L,
         )
-        try:
-            print_green("df_train:", df_train.shape)
-            print_green("df_valid:", df_valid.shape)
-        except Exception as e:
-            print("df_train:", df_train.shape)
-            print("df_valid:", df_valid.shape)
+        # ---- debug dump: ----
+        print_green(f">>> df_train['label'] head:, {df_train['label'].head(10)}")
+        print_green(f">>> df_train['label'] describe:\n{df_train['label'].describe()}")
+        # ----------------------
         if df_train.empty or df_valid.empty:
             raise ValueError("Empty data from dataset, please check your dataset config.")
-
         x_train, y_train = df_train["feature"], df_train["label"]
         x_valid, y_valid = df_valid["feature"], df_valid["label"]
+
+        print_green(f"x_train: {x_train}")
+        print_green(f"y_train: {y_train}")
+        print_green(f"y_valid: {x_valid}")
+        print_green(f"y_valid: {y_valid}")
 
         save_path = get_or_create_path(save_path)
         stop_steps = 0
@@ -271,7 +280,7 @@ class TransformerModel(Model):
             evals_result["train"].append(train_score)
             evals_result["valid"].append(val_score)
 
-            if val_score > best_score:
+            if val_score - best_score >= 0.001: # 0.001 is a threshold to early stop
                 best_score = val_score
                 stop_steps = 0
                 best_epoch = step
@@ -290,7 +299,7 @@ class TransformerModel(Model):
         if self.use_gpu:
             torch.cuda.empty_cache()
 
-    def predict(self, dataset: DatasetH, segment: Union[Text, slice] = "valid"):
+    def predict(self, dataset: DatasetH, segment: Union[Text, slice] = "test"):
         if not self.fitted:
             raise ValueError("model is not fitted yet!")
 
@@ -301,6 +310,7 @@ class TransformerModel(Model):
         sample_num = x_values.shape[0]
         preds = []
 
+        # for begin in range(sample_num)[:: self.batch_size]:
         for begin in range(0 , sample_num , self.batch_size):
             if sample_num - begin < self.batch_size:
                 end = sample_num

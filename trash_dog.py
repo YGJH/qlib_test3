@@ -42,6 +42,10 @@ cmd = [
     "--end_date",
     (pd.Timestamp.now() - pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
 ]
+get_fx_price = f"""uv run scripts/fx_collector.py download --output_dir scripts/data_collector/us_data --start 2021-01-01 --end {(pd.Timestamp.now() - pd.Timedelta(days=1)).strftime("%Y-%m-%d")}"""
+get_fx_price = get_fx_price.split(' ')
+dump_fx_price = f"""uv run scripts/fx_collector.py normalize --output_dir scripts/data_collector/us_data"""
+dump_fx_price = dump_fx_price.split(' ')
 
 filter_cat = [
     "uv",
@@ -60,6 +64,8 @@ print("Running command:", " ".join(cmd))
 while True:
     try:
         clean_dir()
+        subprocess.run(get_fx_price, check=True)
+        subprocess.run(dump_fx_price, check=True)
         subprocess.run(cmd, check=True)
         print_green("Data collection completed successfully.")
         subprocess.run(filter_cat, check=True)

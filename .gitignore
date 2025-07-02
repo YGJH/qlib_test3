@@ -18,3 +18,6 @@ full_version/**
 **.pkl
 **.pkl
 best_transformer.pkl
+ttc/**
+image/**
+tempfile.txt

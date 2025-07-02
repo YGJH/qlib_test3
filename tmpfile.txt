@@ -94,3 +94,27 @@ Model Performance Metrics:
 
 🏆 最佳 seed = 134377, RMSE = 1.193124
 🏆 最佳 market_num = 50, RMSE = 1.171710
+
+
+cd c:/Users/charless/Documents/qlib_test3
+
+# a) 下载 FX 数据（指定时间区间可选）
+python scripts/data_collector/fx_collector.py download \
+   --output_dir scripts/data_collector/fx_data \
+   --start 2021-01-01 --end 2025-06-18
+
+# b) 转为 Qlib Bin 格式
+python scripts/data_collector/fx_collector.py normalize \
+   --output_dir scripts/data_collector/fx_data
+
+
+import qlib
+from qlib.constant import REG_US
+
+qlib.init(
+    provider_uri=[
+        ".qlib/qlib_data/us_data",
+        str(Path.home() / ".qlib" / "qlib_data" / "fx"),
+    ],
+    region=REG_US,
+)
